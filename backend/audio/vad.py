@@ -16,7 +16,7 @@ SILENCE_THRESHOLD_MS = int(os.environ.get("VAD_SILENCE_MS", "800"))
 # Silero VAD expects 512-sample chunks at 16kHz (32ms windows)
 WINDOW_SIZE = 512
 SAMPLE_RATE = 16000
-SPEECH_THRESHOLD = 0.5
+SPEECH_THRESHOLD = 0.7
 
 
 class VoiceActivityDetector:

@@ -8,16 +8,29 @@ export interface TranscriptEntry {
   speaker: 'user' | 'bot'
 }
 
+export interface FeedbackData {
+  overall_score: number
+  clarity_score: number
+  structure_score: number
+  depth_score: number
+  best_moment: string
+  biggest_opportunity: string
+  filler_word_count: number
+}
+
 interface SessionState {
   sessionId: number | null
   scenarioName: string | null
+  view: 'setup' | 'session' | 'review'
   isRecording: boolean
   isConnected: boolean
   isReady: boolean
   vadActive: boolean
   isBotSpeaking: boolean
+  isAnalyzing: boolean
   transcripts: TranscriptEntry[]
   botMessageCounter: number
+  feedback: FeedbackData | null
 
   setSession: (id: number, scenario: string) => void
   clearSession: () => void
@@ -26,6 +39,9 @@ interface SessionState {
   setReady: (v: boolean) => void
   setVadActive: (v: boolean) => void
   setBotSpeaking: (v: boolean) => void
+  setAnalyzing: (v: boolean) => void
+  setFeedback: (f: FeedbackData) => void
+  setView: (v: 'setup' | 'session' | 'review') => void
   addTranscript: (entry: TranscriptEntry) => void
   addBotSentence: (text: string, timestamp: number) => void
   reset: () => void
@@ -34,41 +50,53 @@ interface SessionState {
 export const useSessionStore = create<SessionState>()((set) => ({
   sessionId: null,
   scenarioName: null,
+  view: 'setup',
   isRecording: false,
   isConnected: false,
   isReady: false,
   vadActive: false,
   isBotSpeaking: false,
+  isAnalyzing: false,
   transcripts: [],
   botMessageCounter: 0,
+  feedback: null,
 
   setSession: (id, scenario) =>
     set({
       sessionId: id,
       scenarioName: scenario,
+      view: 'session',
       isRecording: false,
       isReady: false,
       vadActive: false,
       isBotSpeaking: false,
+      isAnalyzing: false,
       transcripts: [],
       botMessageCounter: 0,
+      feedback: null,
     }),
   clearSession: () =>
     set({
       sessionId: null,
       scenarioName: null,
+      view: 'setup',
       isRecording: false,
       isReady: false,
       vadActive: false,
       isBotSpeaking: false,
+      isAnalyzing: false,
       transcripts: [],
       botMessageCounter: 0,
+      feedback: null,
     }),
   setRecording: (v) => set({ isRecording: v }),
   setConnected: (v) => set({ isConnected: v }),
   setReady: (v) => set({ isReady: v }),
   setVadActive: (v) => set({ vadActive: v }),
   setBotSpeaking: (v) => set({ isBotSpeaking: v }),
+  setAnalyzing: (v) => set({ isAnalyzing: v }),
+  setFeedback: (f) => set({ feedback: f }),
+  setView: (v) => set({ view: v }),
   addTranscript: (entry) =>
     set((state) => {
       // Replace existing entry with same turnId, or append
@@ -119,11 +147,14 @@ export const useSessionStore = create<SessionState>()((set) => ({
     set({
       sessionId: null,
       scenarioName: null,
+      view: 'setup',
       isRecording: false,
       isReady: false,
       vadActive: false,
       isBotSpeaking: false,
+      isAnalyzing: false,
       transcripts: [],
       botMessageCounter: 0,
+      feedback: null,
     }),
 }))

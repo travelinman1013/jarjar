@@ -74,12 +74,26 @@ function TranscriptList() {
   )
 }
 
+function AnalyzingOverlay() {
+  const isAnalyzing = useSessionStore((s) => s.isAnalyzing)
+
+  if (!isAnalyzing) return null
+
+  return (
+    <div className="fixed inset-0 bg-gray-950/80 flex items-center justify-center z-50">
+      <div className="text-center">
+        <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4" />
+        <p className="text-gray-300">Analyzing your interview...</p>
+      </div>
+    </div>
+  )
+}
+
 export function LiveSession() {
   const isRecording = useSessionStore((s) => s.isRecording)
   const scenarioName = useSessionStore((s) => s.scenarioName)
   const setRecording = useSessionStore((s) => s.setRecording)
   const setReady = useSessionStore((s) => s.setReady)
-  const clearSession = useSessionStore((s) => s.clearSession)
 
   const { enqueue, flush } = usePlayback(24000)
 
@@ -120,22 +134,44 @@ export function LiveSession() {
     connect()
   }, [connect, setRecording])
 
-  const handleStop = useCallback(() => {
+  const handleStop = useCallback(async () => {
     stopCapture()
     flush()
     sendControl({ type: 'session.stop' })
     setRecording(false)
     setReady(false)
     readyRef.current = false
-    // Small delay to let final transcript arrive before disconnect
-    setTimeout(() => {
-      disconnect()
-      clearSession()
-    }, 1000)
-  }, [stopCapture, flush, sendControl, disconnect, setRecording, setReady, clearSession])
+
+    // Wait for final transcripts to arrive
+    await new Promise((r) => setTimeout(r, 1000))
+    disconnect()
+
+    const { sessionId, setAnalyzing, setFeedback, setView } =
+      useSessionStore.getState()
+    if (!sessionId) return
+
+    setAnalyzing(true)
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/sessions/${sessionId}/analyze`,
+        { method: 'POST' },
+      )
+      if (!res.ok) throw new Error('Analysis failed')
+      const data = await res.json()
+      setFeedback(data)
+      setView('review')
+    } catch (err) {
+      console.error('Failed to analyze session:', err)
+      setView('review')
+    } finally {
+      setAnalyzing(false)
+    }
+  }, [stopCapture, flush, sendControl, disconnect, setRecording, setReady])
 
   return (
     <div className="flex flex-col h-screen">
+      <AnalyzingOverlay />
+
       <header className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
         <div>
           <h1 className="text-xl font-semibold text-gray-100">
@@ -174,7 +210,7 @@ export function LiveSession() {
               : 'bg-blue-600 hover:bg-blue-700 text-white'
           }`}
         >
-          {isRecording ? 'Stop Recording' : 'Start Recording'}
+          {isRecording ? 'End & Review' : 'Start Recording'}
         </button>
       </footer>
     </div>

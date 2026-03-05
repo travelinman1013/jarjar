@@ -47,7 +47,8 @@ class TextToSpeech:
 
     def _synthesize_sync(self, text: str) -> bytes:
         clean = re.sub(r'[^\w\s.,!?\'\"-]', '', text)
-        if not clean.strip():
+        clean = re.sub(r'\s+', ' ', clean).strip()
+        if not clean:
             return b""
         audio_np, _ = self._kokoro.create(clean, voice=KOKORO_VOICE, lang="en-us")
         int16 = (audio_np * 32767).astype(np.int16)

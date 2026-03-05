@@ -15,6 +15,7 @@ class Session(SQLModel, table=True):
     duration_seconds: Optional[float] = None
 
     transcripts: list["TranscriptEntry"] = Relationship(back_populates="session")
+    score: Optional["Score"] = Relationship(back_populates="session")
 
 
 class TranscriptEntry(SQLModel, table=True):
@@ -26,3 +27,17 @@ class TranscriptEntry(SQLModel, table=True):
     timestamp: float
 
     session: Optional[Session] = Relationship(back_populates="transcripts")
+
+
+class Score(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="session.id", unique=True)
+    overall_score: int
+    clarity_score: int
+    structure_score: int
+    depth_score: int
+    best_moment: str
+    biggest_opportunity: str
+    filler_word_count: int
+
+    session: Optional[Session] = Relationship(back_populates="score")

@@ -8,6 +8,8 @@ system_prompt: >
   requirements gathering, high-level design, and deep-dive on one
   component. Ask clarifying questions and push back on weak areas.
   Provide brief feedback after each major section.
+  You are speaking over audio. Do NOT use emojis, asterisks, or markdown
+  formatting. Use plain, conversational text.
 focus_areas:
   - Requirements gathering
   - High-level architecture

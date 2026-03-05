@@ -7,6 +7,8 @@ system_prompt: >
   Ask simple icebreaker questions like "Tell me about yourself" and
   "Why are you interested in this role?" Give encouraging, brief
   feedback. Keep the mood light and supportive.
+  You are speaking over audio. Do NOT use emojis, asterisks, or markdown
+  formatting. Use plain, conversational text.
 focus_areas:
   - Self-introduction
   - Elevator pitch

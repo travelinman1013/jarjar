@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from audio.vad import VoiceActivityDetector
 from audio.stt import SpeechToText
 from audio.tts import TextToSpeech
+from conversation.feedback import count_filler_words, generate_feedback
 from conversation.llm import stream_chat_completion
 from conversation.manager import ConversationManager, chunk_sentences
 from scenarios.loader import load_scenarios, get_scenario_by_name
@@ -24,6 +25,9 @@ from storage.db import (
     create_session as db_create_session,
     add_transcript_entry,
     get_session_scenario,
+    get_session_with_transcripts,
+    get_score_by_session_id,
+    save_score,
     update_session_duration,
 )
 
@@ -79,6 +83,54 @@ async def list_scenarios():
 
 class CreateSessionRequest(BaseModel):
     scenario_name: str
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: int):
+    session_data = await asyncio.to_thread(get_session_with_transcripts, session_id)
+    if not session_data:
+        raise HTTPException(status_code=404, detail="Session not found")
+    score = await asyncio.to_thread(get_score_by_session_id, session_id)
+    return {**session_data, "score": score}
+
+
+@app.post("/api/sessions/{session_id}/analyze")
+async def analyze_session(session_id: int):
+    session_data = await asyncio.to_thread(get_session_with_transcripts, session_id)
+    if not session_data:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    transcripts = session_data["transcripts"]
+    if not transcripts:
+        raise HTTPException(status_code=400, detail="No transcripts to analyze")
+
+    existing = await asyncio.to_thread(get_score_by_session_id, session_id)
+    if existing:
+        return existing
+
+    scenario = await asyncio.to_thread(
+        get_scenario_by_name, session_data["scenario_name"]
+    )
+    evaluation_criteria = scenario.evaluation_criteria if scenario else []
+
+    filler_count = count_filler_words(transcripts)
+    feedback = await generate_feedback(
+        session_id, transcripts, session_data["scenario_name"], evaluation_criteria
+    )
+
+    await asyncio.to_thread(
+        save_score,
+        session_id,
+        feedback.get("overall_score", 5),
+        feedback.get("clarity_score", 5),
+        feedback.get("structure_score", 5),
+        feedback.get("depth_score", 5),
+        feedback.get("best_moment", ""),
+        feedback.get("biggest_opportunity", ""),
+        filler_count,
+    )
+
+    return {**feedback, "filler_word_count": filler_count}
 
 
 @app.post("/api/sessions")
