@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useAudio } from '../../hooks/useAudio'
 import { useWebSocket } from '../../hooks/useWebSocket'
+import { usePlayback } from '../../hooks/usePlayback'
 
 // Subscribe to slices individually to avoid re-renders from vadActive changes
 function VadIndicator() {
@@ -24,6 +25,20 @@ function VadIndicator() {
   )
 }
 
+function BotSpeakingIndicator() {
+  const isBotSpeaking = useSessionStore((s) => s.isBotSpeaking)
+  const isRecording = useSessionStore((s) => s.isRecording)
+
+  if (!isRecording || !isBotSpeaking) return null
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" />
+      <span className="text-sm text-gray-400">Bot speaking...</span>
+    </div>
+  )
+}
+
 function TranscriptList() {
   const transcripts = useSessionStore((s) => s.transcripts)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -40,10 +55,17 @@ function TranscriptList() {
         </p>
       )}
       {transcripts.map((t) => (
-        <div key={t.turnId} className="bg-gray-800 rounded-lg p-4">
+        <div
+          key={`${t.speaker}-${t.turnId}`}
+          className={`rounded-lg p-4 max-w-[80%] ${
+            t.speaker === 'bot'
+              ? 'bg-blue-900/40 mr-auto'
+              : 'bg-gray-800 ml-auto'
+          }`}
+        >
           <p className="text-gray-100">{t.text}</p>
           <span className="text-xs text-gray-500 mt-1 block">
-            Turn {t.turnId}
+            {t.speaker === 'bot' ? 'Coach' : `Turn ${t.turnId}`}
           </span>
         </div>
       ))}
@@ -58,8 +80,13 @@ export function LiveSession() {
   const setReady = useSessionStore((s) => s.setReady)
   const reset = useSessionStore((s) => s.reset)
 
+  const { enqueue, flush } = usePlayback(24000)
+
   const { connect, disconnect, sendAudioChunk, sendControl, isConnected } =
-    useWebSocket()
+    useWebSocket({
+      onAudioData: enqueue,
+      onInterrupt: flush,
+    })
 
   const { startCapture, stopCapture } = useAudio({
     onAudioChunk: sendAudioChunk,
@@ -77,6 +104,15 @@ export function LiveSession() {
     })
   }, [startCapture])
 
+  // Flush playback when user starts speaking (client-side immediate interruption)
+  useEffect(() => {
+    return useSessionStore.subscribe((state, prevState) => {
+      if (state.vadActive && !prevState.vadActive) {
+        flush()
+      }
+    })
+  }, [flush])
+
   const handleStart = useCallback(() => {
     reset()
     readyRef.current = false
@@ -86,13 +122,14 @@ export function LiveSession() {
 
   const handleStop = useCallback(() => {
     stopCapture()
+    flush()
     sendControl({ type: 'session.stop' })
     setRecording(false)
     setReady(false)
     readyRef.current = false
     // Small delay to let final transcript arrive before disconnect
     setTimeout(() => disconnect(), 1000)
-  }, [stopCapture, sendControl, disconnect, setRecording, setReady])
+  }, [stopCapture, flush, sendControl, disconnect, setRecording, setReady])
 
   return (
     <div className="flex flex-col h-screen">
@@ -101,6 +138,7 @@ export function LiveSession() {
           Voice Interview Coach
         </h1>
         <div className="flex items-center gap-4">
+          <BotSpeakingIndicator />
           <VadIndicator />
           <div className="flex items-center gap-2">
             <div

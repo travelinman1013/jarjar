@@ -5,6 +5,7 @@ export interface TranscriptEntry {
   text: string
   isFinal: boolean
   timestamp: number
+  speaker: 'user' | 'bot'
 }
 
 interface SessionState {
@@ -12,13 +13,17 @@ interface SessionState {
   isConnected: boolean
   isReady: boolean
   vadActive: boolean
+  isBotSpeaking: boolean
   transcripts: TranscriptEntry[]
+  botMessageCounter: number
 
   setRecording: (v: boolean) => void
   setConnected: (v: boolean) => void
   setReady: (v: boolean) => void
   setVadActive: (v: boolean) => void
+  setBotSpeaking: (v: boolean) => void
   addTranscript: (entry: TranscriptEntry) => void
+  addBotSentence: (text: string, timestamp: number) => void
   reset: () => void
 }
 
@@ -27,16 +32,21 @@ export const useSessionStore = create<SessionState>()((set) => ({
   isConnected: false,
   isReady: false,
   vadActive: false,
+  isBotSpeaking: false,
   transcripts: [],
+  botMessageCounter: 0,
 
   setRecording: (v) => set({ isRecording: v }),
   setConnected: (v) => set({ isConnected: v }),
   setReady: (v) => set({ isReady: v }),
   setVadActive: (v) => set({ vadActive: v }),
+  setBotSpeaking: (v) => set({ isBotSpeaking: v }),
   addTranscript: (entry) =>
     set((state) => {
       // Replace existing entry with same turnId, or append
-      const idx = state.transcripts.findIndex((t) => t.turnId === entry.turnId)
+      const idx = state.transcripts.findIndex(
+        (t) => t.turnId === entry.turnId && t.speaker === entry.speaker,
+      )
       if (idx >= 0) {
         const updated = [...state.transcripts]
         updated[idx] = entry
@@ -44,11 +54,46 @@ export const useSessionStore = create<SessionState>()((set) => ({
       }
       return { transcripts: [...state.transcripts, entry] }
     }),
+  addBotSentence: (text, timestamp) =>
+    set((state) => {
+      // Accumulate bot sentences into a single transcript entry per response
+      const lastBot = [...state.transcripts]
+        .reverse()
+        .find((t) => t.speaker === 'bot')
+      if (lastBot && state.isBotSpeaking) {
+        // Append to existing bot message
+        const idx = state.transcripts.indexOf(lastBot)
+        const updated = [...state.transcripts]
+        updated[idx] = {
+          ...lastBot,
+          text: lastBot.text + ' ' + text,
+          timestamp,
+        }
+        return { transcripts: updated }
+      }
+      // New bot message
+      const counter = state.botMessageCounter - 1
+      return {
+        botMessageCounter: counter,
+        transcripts: [
+          ...state.transcripts,
+          {
+            turnId: counter,
+            text,
+            isFinal: false,
+            timestamp,
+            speaker: 'bot',
+          },
+        ],
+      }
+    }),
   reset: () =>
     set({
       isRecording: false,
       isReady: false,
       vadActive: false,
+      isBotSpeaking: false,
       transcripts: [],
+      botMessageCounter: 0,
     }),
 }))
