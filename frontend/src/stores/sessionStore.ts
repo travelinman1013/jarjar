@@ -9,6 +9,8 @@ export interface TranscriptEntry {
 }
 
 interface SessionState {
+  sessionId: number | null
+  scenarioName: string | null
   isRecording: boolean
   isConnected: boolean
   isReady: boolean
@@ -17,6 +19,8 @@ interface SessionState {
   transcripts: TranscriptEntry[]
   botMessageCounter: number
 
+  setSession: (id: number, scenario: string) => void
+  clearSession: () => void
   setRecording: (v: boolean) => void
   setConnected: (v: boolean) => void
   setReady: (v: boolean) => void
@@ -28,6 +32,8 @@ interface SessionState {
 }
 
 export const useSessionStore = create<SessionState>()((set) => ({
+  sessionId: null,
+  scenarioName: null,
   isRecording: false,
   isConnected: false,
   isReady: false,
@@ -36,6 +42,28 @@ export const useSessionStore = create<SessionState>()((set) => ({
   transcripts: [],
   botMessageCounter: 0,
 
+  setSession: (id, scenario) =>
+    set({
+      sessionId: id,
+      scenarioName: scenario,
+      isRecording: false,
+      isReady: false,
+      vadActive: false,
+      isBotSpeaking: false,
+      transcripts: [],
+      botMessageCounter: 0,
+    }),
+  clearSession: () =>
+    set({
+      sessionId: null,
+      scenarioName: null,
+      isRecording: false,
+      isReady: false,
+      vadActive: false,
+      isBotSpeaking: false,
+      transcripts: [],
+      botMessageCounter: 0,
+    }),
   setRecording: (v) => set({ isRecording: v }),
   setConnected: (v) => set({ isConnected: v }),
   setReady: (v) => set({ isReady: v }),
@@ -89,6 +117,8 @@ export const useSessionStore = create<SessionState>()((set) => ({
     }),
   reset: () =>
     set({
+      sessionId: null,
+      scenarioName: null,
       isRecording: false,
       isReady: false,
       vadActive: false,

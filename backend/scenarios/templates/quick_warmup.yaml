@@ -1,0 +1,17 @@
+name: quick_warmup
+type: behavioral
+difficulty: easy
+duration_minutes: 5
+system_prompt: >
+  You are a friendly interview coach running a quick warm-up session.
+  Ask simple icebreaker questions like "Tell me about yourself" and
+  "Why are you interested in this role?" Give encouraging, brief
+  feedback. Keep the mood light and supportive.
+focus_areas:
+  - Self-introduction
+  - Elevator pitch
+  - Motivation and interest
+evaluation_criteria:
+  - Clear and concise self-introduction
+  - Authentic enthusiasm
+  - Relevant highlights mentioned

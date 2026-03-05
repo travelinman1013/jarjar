@@ -7,20 +7,52 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from audio.vad import VoiceActivityDetector
 from audio.stt import SpeechToText
 from audio.tts import TextToSpeech
 from conversation.llm import stream_chat_completion
 from conversation.manager import ConversationManager, chunk_sentences
+from scenarios.loader import load_scenarios, get_scenario_by_name
+from storage.db import (
+    create_db_and_tables,
+    create_session as db_create_session,
+    add_transcript_entry,
+    get_session_scenario,
+    update_session_duration,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Voice Interview Coach")
+# Global instances — models loaded once, shared across connections
+stt = SpeechToText()
+tts = TextToSpeech()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: DB first (instant), then ML models (slow)."""
+    create_db_and_tables()
+    logger.info("Database initialized.")
+
+    logger.info("Loading whisper model (first run downloads ~1.5GB)...")
+    await asyncio.to_thread(stt.load_model)
+    logger.info("Whisper model loaded and ready.")
+
+    logger.info("Loading Kokoro TTS model...")
+    await asyncio.to_thread(tts.load_model)
+    logger.info("Kokoro TTS model loaded and ready.")
+
+    yield
+
+
+app = FastAPI(title="Voice Interview Coach", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,20 +62,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global instances — models loaded once, shared across connections
-stt = SpeechToText()
-tts = TextToSpeech()
 
-
-@app.on_event("startup")
-async def startup():
-    """Pre-load ML models at server startup."""
-    logger.info("Loading whisper model (first run downloads ~1.5GB)...")
-    await asyncio.to_thread(stt.load_model)
-    logger.info("Whisper model loaded and ready.")
-    logger.info("Loading Kokoro TTS model...")
-    await asyncio.to_thread(tts.load_model)
-    logger.info("Kokoro TTS model loaded and ready.")
+# ── REST endpoints ──────────────────────────────────────────────────────────
 
 
 @app.get("/")
@@ -51,9 +71,33 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/api/scenarios")
+async def list_scenarios():
+    scenarios = await asyncio.to_thread(load_scenarios)
+    return [s.model_dump() for s in scenarios]
+
+
+class CreateSessionRequest(BaseModel):
+    scenario_name: str
+
+
+@app.post("/api/sessions")
+async def create_session(req: CreateSessionRequest):
+    scenario = await asyncio.to_thread(get_scenario_by_name, req.scenario_name)
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    session = await asyncio.to_thread(db_create_session, req.scenario_name)
+    return {"session_id": session.id, "scenario_name": session.scenario_name}
+
+
+# ── Bot response pipeline ──────────────────────────────────────────────────
+
+
 async def run_bot_response(
     websocket: WebSocket,
     conversation: ConversationManager,
+    session_id: int | None = None,
+    bot_turn_id: int = 0,
 ):
     """LLM -> sentence chunking -> TTS -> WebSocket binary send."""
     raw_tokens: list[str] = []
@@ -84,12 +128,22 @@ async def run_bot_response(
         raw_response = "".join(raw_tokens)
         if raw_response:
             conversation.add_assistant_message(raw_response)
+            if session_id:
+                await asyncio.to_thread(
+                    add_transcript_entry,
+                    session_id, bot_turn_id, "bot", raw_response, time.time(),
+                )
         await websocket.send_json({"type": "bot_speech_stop"})
 
     except asyncio.CancelledError:
         raw_response = "".join(raw_tokens)
         if raw_response:
             conversation.add_assistant_message(raw_response)
+            if session_id:
+                await asyncio.to_thread(
+                    add_transcript_entry,
+                    session_id, bot_turn_id, "bot", raw_response, time.time(),
+                )
         raise
 
 
@@ -103,6 +157,9 @@ async def cancel_bot_task(task: asyncio.Task | None) -> None:
             pass
 
 
+# ── WebSocket handler ───────────────────────────────────────────────────────
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -110,6 +167,8 @@ async def websocket_endpoint(websocket: WebSocket):
     conversation = ConversationManager()
     turn_id = 0
     bot_response_task: asyncio.Task | None = None
+    session_id: int | None = None
+    session_start_time: float | None = None
 
     try:
         while True:
@@ -144,11 +203,20 @@ async def websocket_endpoint(websocket: WebSocket):
                             })
                             logger.info(f"Turn {tid}: '{text}'")
 
+                            # Persist user transcript
+                            if session_id:
+                                await asyncio.to_thread(
+                                    add_transcript_entry,
+                                    session_id, tid, "user", text, time.time(),
+                                )
+
                             # Feed to conversation and spawn bot response
                             conversation.add_user_message(text)
                             await cancel_bot_task(bot_response_task)
                             bot_response_task = asyncio.create_task(
-                                run_bot_response(websocket, conversation)
+                                run_bot_response(
+                                    websocket, conversation, session_id, tid,
+                                )
                             )
 
             elif "text" in message:
@@ -158,9 +226,36 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if msg_type == "session.start":
                     vad.reset()
-                    conversation.reset()
                     turn_id = 0
-                    logger.info("Session started")
+                    session_id = data.get("session_id")
+
+                    try:
+                        if session_id:
+                            scenario_name = await asyncio.to_thread(
+                                get_session_scenario, session_id,
+                            )
+                            if scenario_name:
+                                scenario = await asyncio.to_thread(
+                                    get_scenario_by_name, scenario_name,
+                                )
+                                if scenario:
+                                    conversation = ConversationManager(
+                                        system_prompt=scenario.system_prompt,
+                                    )
+                                else:
+                                    conversation = ConversationManager()
+                            else:
+                                conversation = ConversationManager()
+                        else:
+                            conversation = ConversationManager()
+                    except Exception:
+                        logger.exception(
+                            "Failed to load scenario for session %s", session_id,
+                        )
+                        conversation = ConversationManager()
+
+                    session_start_time = time.time()
+                    logger.info(f"Session started (id={session_id})")
                     await websocket.send_json({"type": "session.ready"})
 
                 elif msg_type == "session.stop":
@@ -179,8 +274,27 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "turn_id": turn_id,
                                 "timestamp": time.time(),
                             })
+                            if session_id:
+                                await asyncio.to_thread(
+                                    add_transcript_entry,
+                                    session_id, turn_id, "user", text, time.time(),
+                                )
+
+                    # Record session duration
+                    if session_id and session_start_time:
+                        duration = time.time() - session_start_time
+                        await asyncio.to_thread(
+                            update_session_duration, session_id, duration,
+                        )
+
                     logger.info("Session stopped")
 
     except WebSocketDisconnect:
         await cancel_bot_task(bot_response_task)
+        # Record duration on unexpected disconnect
+        if session_id and session_start_time:
+            duration = time.time() - session_start_time
+            await asyncio.to_thread(
+                update_session_duration, session_id, duration,
+            )
         logger.info("Client disconnected")

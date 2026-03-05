@@ -15,7 +15,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   optionsRef.current = options
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
+    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return
 
     const ws = new WebSocket(WS_URL)
     ws.binaryType = 'arraybuffer'
@@ -23,8 +23,11 @@ export function useWebSocket(options?: UseWebSocketOptions) {
 
     ws.onopen = () => {
       setIsConnected(true)
-      // Automatically start session when connected
-      ws.send(JSON.stringify({ type: 'session.start' }))
+      const { sessionId } = useSessionStore.getState()
+      ws.send(JSON.stringify({
+        type: 'session.start',
+        ...(sessionId != null && { session_id: sessionId }),
+      }))
     }
 
     ws.onmessage = (event: MessageEvent) => {

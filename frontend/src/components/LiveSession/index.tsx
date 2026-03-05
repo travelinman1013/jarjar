@@ -76,9 +76,10 @@ function TranscriptList() {
 
 export function LiveSession() {
   const isRecording = useSessionStore((s) => s.isRecording)
+  const scenarioName = useSessionStore((s) => s.scenarioName)
   const setRecording = useSessionStore((s) => s.setRecording)
   const setReady = useSessionStore((s) => s.setReady)
-  const reset = useSessionStore((s) => s.reset)
+  const clearSession = useSessionStore((s) => s.clearSession)
 
   const { enqueue, flush } = usePlayback(24000)
 
@@ -114,11 +115,10 @@ export function LiveSession() {
   }, [flush])
 
   const handleStart = useCallback(() => {
-    reset()
     readyRef.current = false
     setRecording(true)
     connect()
-  }, [connect, setRecording, reset])
+  }, [connect, setRecording])
 
   const handleStop = useCallback(() => {
     stopCapture()
@@ -128,15 +128,25 @@ export function LiveSession() {
     setReady(false)
     readyRef.current = false
     // Small delay to let final transcript arrive before disconnect
-    setTimeout(() => disconnect(), 1000)
-  }, [stopCapture, flush, sendControl, disconnect, setRecording, setReady])
+    setTimeout(() => {
+      disconnect()
+      clearSession()
+    }, 1000)
+  }, [stopCapture, flush, sendControl, disconnect, setRecording, setReady, clearSession])
 
   return (
     <div className="flex flex-col h-screen">
       <header className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
-        <h1 className="text-xl font-semibold text-gray-100">
-          Voice Interview Coach
-        </h1>
+        <div>
+          <h1 className="text-xl font-semibold text-gray-100">
+            Voice Interview Coach
+          </h1>
+          {scenarioName && (
+            <span className="text-sm text-gray-400">
+              {scenarioName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-4">
           <BotSpeakingIndicator />
           <VadIndicator />
