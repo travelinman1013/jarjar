@@ -1,0 +1,134 @@
+import { useEffect, useRef, useCallback } from 'react'
+import { useSessionStore } from '../../stores/sessionStore'
+import { useAudio } from '../../hooks/useAudio'
+import { useWebSocket } from '../../hooks/useWebSocket'
+
+// Subscribe to slices individually to avoid re-renders from vadActive changes
+function VadIndicator() {
+  const vadActive = useSessionStore((s) => s.vadActive)
+  const isRecording = useSessionStore((s) => s.isRecording)
+
+  if (!isRecording) return null
+
+  return (
+    <div className="flex items-center gap-2">
+      <div
+        className={`w-3 h-3 rounded-full transition-colors ${
+          vadActive ? 'bg-red-500 animate-pulse' : 'bg-red-900'
+        }`}
+      />
+      <span className="text-sm text-gray-400">
+        {vadActive ? 'Listening...' : 'Waiting for speech...'}
+      </span>
+    </div>
+  )
+}
+
+function TranscriptList() {
+  const transcripts = useSessionStore((s) => s.transcripts)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [transcripts])
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      {transcripts.length === 0 && (
+        <p className="text-gray-500 text-center mt-20">
+          Transcripts will appear here as you speak...
+        </p>
+      )}
+      {transcripts.map((t) => (
+        <div key={t.turnId} className="bg-gray-800 rounded-lg p-4">
+          <p className="text-gray-100">{t.text}</p>
+          <span className="text-xs text-gray-500 mt-1 block">
+            Turn {t.turnId}
+          </span>
+        </div>
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  )
+}
+
+export function LiveSession() {
+  const isRecording = useSessionStore((s) => s.isRecording)
+  const setRecording = useSessionStore((s) => s.setRecording)
+  const setReady = useSessionStore((s) => s.setReady)
+  const reset = useSessionStore((s) => s.reset)
+
+  const { connect, disconnect, sendAudioChunk, sendControl, isConnected } =
+    useWebSocket()
+
+  const { startCapture, stopCapture } = useAudio({
+    onAudioChunk: sendAudioChunk,
+  })
+
+  const readyRef = useRef(false)
+
+  // Listen for session.ready to start capture
+  useEffect(() => {
+    return useSessionStore.subscribe((state) => {
+      if (state.isReady && !readyRef.current) {
+        readyRef.current = true
+        startCapture()
+      }
+    })
+  }, [startCapture])
+
+  const handleStart = useCallback(() => {
+    reset()
+    readyRef.current = false
+    setRecording(true)
+    connect()
+  }, [connect, setRecording, reset])
+
+  const handleStop = useCallback(() => {
+    stopCapture()
+    sendControl({ type: 'session.stop' })
+    setRecording(false)
+    setReady(false)
+    readyRef.current = false
+    // Small delay to let final transcript arrive before disconnect
+    setTimeout(() => disconnect(), 1000)
+  }, [stopCapture, sendControl, disconnect, setRecording, setReady])
+
+  return (
+    <div className="flex flex-col h-screen">
+      <header className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+        <h1 className="text-xl font-semibold text-gray-100">
+          Voice Interview Coach
+        </h1>
+        <div className="flex items-center gap-4">
+          <VadIndicator />
+          <div className="flex items-center gap-2">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                isConnected ? 'bg-green-500' : 'bg-gray-600'
+              }`}
+            />
+            <span className="text-xs text-gray-500">
+              {isConnected ? 'Connected' : 'Disconnected'}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <TranscriptList />
+
+      <footer className="px-6 py-4 border-t border-gray-800">
+        <button
+          onClick={isRecording ? handleStop : handleStart}
+          className={`w-full py-3 rounded-lg font-medium transition-colors ${
+            isRecording
+              ? 'bg-red-600 hover:bg-red-700 text-white'
+              : 'bg-blue-600 hover:bg-blue-700 text-white'
+          }`}
+        >
+          {isRecording ? 'Stop Recording' : 'Start Recording'}
+        </button>
+      </footer>
+    </div>
+  )
+}
