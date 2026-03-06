@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 stt = SpeechToText()
 tts = TextToSpeech()
 
+# RAG retriever — initialized at startup, None if Ollama unavailable
+knowledge_retriever = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -54,6 +57,20 @@ async def lifespan(app: FastAPI):
     logger.info("Loading Kokoro TTS model...")
     await asyncio.to_thread(tts.load_model)
     logger.info("Kokoro TTS model loaded and ready.")
+
+    global knowledge_retriever
+    try:
+        from knowledge.embedder import OllamaEmbedder
+        from knowledge.store import KnowledgeStore
+        from knowledge.retriever import KnowledgeRetriever
+
+        embedder = OllamaEmbedder()
+        store = KnowledgeStore()
+        knowledge_retriever = KnowledgeRetriever(embedder, store)
+        logger.info("Knowledge retriever initialized.")
+    except Exception:
+        logger.warning("Knowledge retriever unavailable — RAG disabled.")
+        knowledge_retriever = None
 
     yield
 
@@ -117,7 +134,9 @@ async def analyze_session(session_id: int):
 
     filler_count = count_filler_words(transcripts)
     feedback = await generate_feedback(
-        session_id, transcripts, session_data["scenario_name"], evaluation_criteria
+        session_id, transcripts, session_data["scenario_name"], evaluation_criteria,
+        retriever=knowledge_retriever,
+        knowledge_collections=scenario.knowledge_collections if scenario else [],
     )
 
     await asyncio.to_thread(
@@ -244,6 +263,7 @@ async def websocket_endpoint(websocket: WebSocket):
     bot_response_task: asyncio.Task | None = None
     session_id: int | None = None
     session_start_time: float | None = None
+    knowledge_collections: list[str] = []
 
     try:
         while True:
@@ -287,6 +307,23 @@ async def websocket_endpoint(websocket: WebSocket):
 
                             # Feed to conductor and spawn bot response
                             conductor.add_user_message(text)
+
+                            # RAG: retrieve relevant knowledge chunks
+                            if knowledge_retriever and knowledge_collections:
+                                try:
+                                    chunks = await knowledge_retriever.retrieve(
+                                        query=text,
+                                        collections=knowledge_collections,
+                                        top_k=3,
+                                    )
+                                    conductor.set_rag_context(
+                                        knowledge_retriever.format_context(chunks)
+                                        if chunks else None
+                                    )
+                                except Exception:
+                                    logger.warning("RAG retrieval failed, continuing without context")
+                                    conductor.set_rag_context(None)
+
                             await cancel_bot_task(bot_response_task)
                             bot_response_task = asyncio.create_task(
                                 run_bot_response_with_routing(
@@ -318,6 +355,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                         base_system_prompt=scenario.system_prompt,
                                         phases=scenario.phases or None,
                                     )
+                                    knowledge_collections = scenario.knowledge_collections
                                 else:
                                     conductor = InterviewConductor()
                             else:

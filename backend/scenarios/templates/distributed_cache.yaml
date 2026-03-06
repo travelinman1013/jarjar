@@ -12,6 +12,9 @@ system_prompt: >
   feedback after each section.
   You are speaking over audio. Do NOT use emojis, asterisks, or markdown
   formatting. Use plain, conversational text.
+knowledge_collections:
+  - distributed_systems
+  - system_design
 focus_areas:
   - Cache eviction strategies (LRU, LFU, TTL)
   - Data partitioning and consistent hashing

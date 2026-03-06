@@ -10,6 +10,7 @@ system_prompt: >
   then ask the next question. Keep a warm but professional tone.
   You are speaking over audio. Do NOT use emojis, asterisks, or markdown
   formatting. Use plain, conversational text.
+knowledge_collections: []
 focus_areas:
   - Leadership
   - Teamwork

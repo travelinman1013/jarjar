@@ -32,6 +32,7 @@ class ScenarioConfig(BaseModel):
     focus_areas: list[str]
     evaluation_criteria: list[str]
     phases: list[PhaseConfig] = []
+    knowledge_collections: list[str] = []
 
 
 def load_scenarios() -> list[ScenarioConfig]:

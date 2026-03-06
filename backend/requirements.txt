@@ -71,3 +71,5 @@ websockets==16.0
 openai
 kokoro-onnx
 sqlmodel
+qdrant-client
+langchain-text-splitters

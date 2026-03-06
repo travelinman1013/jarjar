@@ -9,6 +9,7 @@ system_prompt: >
   feedback. Keep the mood light and supportive.
   You are speaking over audio. Do NOT use emojis, asterisks, or markdown
   formatting. Use plain, conversational text.
+knowledge_collections: []
 focus_areas:
   - Self-introduction
   - Elevator pitch

@@ -28,6 +28,8 @@ async def generate_feedback(
     transcripts: list[dict],
     scenario_name: str,
     evaluation_criteria: list[str],
+    retriever=None,
+    knowledge_collections: list[str] | None = None,
 ) -> dict:
     """Call LLM to generate structured JSON feedback for a completed session."""
     transcript_text = "\n".join(
@@ -45,7 +47,8 @@ async def generate_feedback(
         '  "structure_score": <integer 0-10>,\n'
         '  "depth_score": <integer 0-10>,\n'
         '  "best_moment": "<one sentence quoting or describing their strongest answer>",\n'
-        '  "biggest_opportunity": "<one sentence of actionable improvement advice>"\n'
+        '  "biggest_opportunity": "<one sentence of actionable improvement advice>",\n'
+        '  "technical_accuracy_notes": "<any incorrect claims or missed key concepts, or empty string if N/A>"\n'
         "}\n\n"
         "Score descriptions:\n"
         "- clarity_score: How clearly and concisely the candidate communicated\n"
@@ -54,10 +57,34 @@ async def generate_feedback(
         "- overall_score: Holistic assessment of interview performance"
     )
 
+    # RAG: retrieve reference material for grounded evaluation
+    rag_section = ""
+    if retriever and knowledge_collections:
+        try:
+            user_text = " ".join(
+                t["text"] for t in transcripts if t["speaker"] == "user"
+            )
+            chunks = await retriever.retrieve(
+                query=user_text[:500],
+                collections=knowledge_collections,
+                top_k=5,
+            )
+            if chunks:
+                rag_section = (
+                    "\n\nWhen evaluating technical accuracy, cross-reference the "
+                    "candidate's claims against the following reference material. "
+                    "Note any incorrect claims or missed key concepts in "
+                    "technical_accuracy_notes.\n\n"
+                    + retriever.format_context(chunks)
+                )
+        except Exception:
+            pass
+
     user_prompt = (
         f"Scenario: {scenario_name}\n"
         f"Evaluation criteria: {', '.join(evaluation_criteria)}\n\n"
         f"Transcript:\n{transcript_text}"
+        f"{rag_section}"
     )
 
     response = await client.chat.completions.create(

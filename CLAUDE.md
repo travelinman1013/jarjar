@@ -27,6 +27,24 @@ npm run lint      # ESLint
 ### LM Studio
 Must be running on `http://localhost:1234` with a model loaded before starting sessions. Configured via `backend/.env`.
 
+### Ollama (for RAG embeddings)
+Must be running with an embedding model pulled before using the RAG knowledge base.
+```bash
+ollama pull nomic-embed-text
+ollama serve                        # Runs on :11434
+```
+
+### Knowledge Base Ingestion
+```bash
+cd backend
+source .venv/bin/activate
+python -m knowledge.ingest ingest knowledge/content/system_design/ --collection system_design
+python -m knowledge.ingest ingest knowledge/content/distributed_systems/ --collection distributed_systems
+python -m knowledge.ingest list                          # Show collections
+python -m knowledge.ingest query "consistent hashing" --collection system_design  # Test retrieval
+python -m knowledge.ingest delete system_design          # Re-ingest
+```
+
 ## Architecture
 
 **Real-time bidirectional voice pipeline over a single WebSocket (`ws://localhost:8000/ws`):**
@@ -34,6 +52,7 @@ Must be running on `http://localhost:1234` with a model loaded before starting s
 ```
 Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
     → FastAPI → Silero VAD (speech detection) → mlx-whisper (transcription)
+    → RAG retrieval (Qdrant + Ollama embeddings, optional)
     → LM Studio LLM (streaming response) → Kokoro TTS (speech synthesis)
     → WebSocket binary+JSON frames → Zustand store → React UI
 ```
@@ -41,7 +60,7 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 ### WebSocket Protocol
 - **Binary frames** (client→server): Raw 16-bit PCM, 16kHz mono, ~3200 bytes/100ms chunks
 - **Binary frames** (server→client): TTS audio, 16-bit PCM, 24kHz mono
-- **JSON text frames** (both directions): Control messages (`session.start`, `session.stop`, `session.ready`) and data (`transcript`, `vad`, `bot_transcript`, `bot_speech_start`, `bot_speech_stop`, `interrupt_ack`)
+- **JSON text frames** (both directions): Control messages (`session.start`, `session.stop`, `session.ready`) and data (`transcript`, `vad`, `bot_transcript`, `bot_speech_start`, `bot_speech_stop`, `interrupt_ack`, `phase_change`)
 
 ### REST API
 - `GET /` — Health check
@@ -51,14 +70,20 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 - `POST /api/sessions/{id}/analyze` — Run post-session LLM feedback analysis (idempotent)
 
 ### Backend (`backend/`)
-- **`main.py`** — FastAPI entrypoint. Loads `.env` via python-dotenv before imports. Global `SpeechToText` and `TextToSpeech` instances loaded at startup; per-connection `VoiceActivityDetector` and `ConversationManager`. Heavy ops run via `asyncio.to_thread()`.
+- **`main.py`** — FastAPI entrypoint. Loads `.env` via python-dotenv before imports. Global `SpeechToText`, `TextToSpeech`, and `KnowledgeRetriever` instances loaded at startup; per-connection `VoiceActivityDetector` and `InterviewConductor`. Heavy ops run via `asyncio.to_thread()`.
 - **`audio/vad.py`** — Silero VAD wrapper. 512-sample windows (32ms), threshold 0.7. Silence threshold configurable via `VAD_SILENCE_MS` env var (default 800ms).
 - **`audio/stt.py`** — mlx-whisper wrapper. Model: `mlx-community/whisper-large-v3-turbo`. Synchronous `transcribe_sync()`, language pinned to English.
 - **`audio/tts.py`** — Kokoro TTS (ONNX). Strips non-speech characters and normalizes whitespace before synthesis. Returns Int16 PCM at 24kHz.
 - **`conversation/llm.py`** — AsyncOpenAI client pointing to LM Studio. Streaming `stream_chat_completion()` for conversation, non-streaming calls for feedback analysis.
-- **`conversation/manager.py`** — Maintains per-session message history. `chunk_sentences()` buffers streaming tokens into complete sentences for TTS.
-- **`conversation/feedback.py`** — Post-session analysis. `count_filler_words()` uses regex on user transcripts. `generate_feedback()` calls LLM with `response_format=json_object` for structured scoring.
-- **`scenarios/loader.py`** — Loads YAML scenario configs from `scenarios/templates/`. Each has `system_prompt`, `focus_areas`, `evaluation_criteria`.
+- **`conversation/manager.py`** — Legacy flat conversation manager (superseded by `phases.py`). `chunk_sentences()` buffers streaming tokens into complete sentences for TTS.
+- **`conversation/phases.py`** — Phase-aware `InterviewConductor` replacing `ConversationManager`. State machine with phase-specific system prompt injection, turn counting, context window management (max 40 messages), and RAG context injection via `set_rag_context()`.
+- **`conversation/router.py`** — Lightweight LLM-based phase transition router. Runs off the hot path after each bot response. Uses `PhaseDecision` Pydantic model with `should_advance`, `next_phase`, `reasoning`. Force-advances at `max_turns`.
+- **`conversation/feedback.py`** — Post-session analysis. `count_filler_words()` uses regex on user transcripts. `generate_feedback()` calls LLM with `response_format=json_object` for structured scoring. Optionally grounds evaluation against RAG-retrieved technical reference material.
+- **`knowledge/embedder.py`** — Async/sync wrapper around Ollama's embedding API (`nomic-embed-text`). Supports single and batch embedding.
+- **`knowledge/store.py`** — Qdrant vector store in local disk mode (no server). Collection-per-topic namespacing, cosine distance. All operations are synchronous (callers use `asyncio.to_thread()`).
+- **`knowledge/retriever.py`** — High-level RAG orchestrator. Embeds query, searches Qdrant, filters by distance threshold (0.8 max), formats chunks for system prompt injection. Returns `None` for irrelevant queries.
+- **`knowledge/ingest.py`** — CLI tool for ingesting markdown/text documents into the vector store. Uses `RecursiveCharacterTextSplitter` for chunking.
+- **`scenarios/loader.py`** — Loads YAML scenario configs from `scenarios/templates/`. Each has `system_prompt`, `focus_areas`, `evaluation_criteria`, `phases`, and `knowledge_collections`.
 - **`storage/models.py`** — SQLModel tables: `Session`, `TranscriptEntry`, `Score`.
 - **`storage/db.py`** — SQLite CRUD helpers (all synchronous, called via `asyncio.to_thread()`).
 
@@ -76,9 +101,12 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 
 - Audio format: 16-bit signed PCM, little-endian. 16kHz mono for mic/STT, 24kHz mono for TTS playback.
 - CORS is configured for `http://localhost:5173` only
-- Backend `.env` is gitignored; `backend/.env` holds runtime config (VAD_SILENCE_MS, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, KOKORO_VOICE)
+- Backend `.env` is gitignored; `backend/.env` holds runtime config (VAD_SILENCE_MS, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, KOKORO_VOICE, OLLAMA_BASE_URL, EMBEDDING_MODEL, QDRANT_PERSIST_DIR)
 - Frontend uses Tailwind CSS v4 (CSS-based config via `@import "tailwindcss"`, no `tailwind.config.js`)
 - React 19 with strict mode enabled
 - All system prompts include plain-text audio instruction (no emojis, no markdown) to prevent TTS issues
 - Database: SQLite at `backend/sessions.db`, auto-created on startup
 - LLM feedback responses are stripped of markdown code fences before JSON parsing
+- RAG knowledge base is optional — app works without Ollama or ingested content (graceful degradation)
+- Qdrant vector store persists at `backend/knowledge/qdrant_db/` (gitignored)
+- Knowledge base content lives in `backend/knowledge/content/` organized by topic subdirectory

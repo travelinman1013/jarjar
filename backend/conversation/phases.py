@@ -44,6 +44,9 @@ class InterviewConductor:
         self.turn_count_in_phase: int = 0
         self.phase_history: list[dict] = []
 
+        # RAG context (injected per-turn by retriever)
+        self.rag_context: str | None = None
+
         # Build initial system message
         self._rebuild_system_message()
 
@@ -57,11 +60,18 @@ class InterviewConductor:
                 f"{phase.prompt_injection}\n"
                 f"[Phase objective: {phase.objective}]"
             )
+        if self.rag_context:
+            prompt += f"\n\n{self.rag_context}"
         system_msg = {"role": "system", "content": prompt}
         if self.messages:
             self.messages[0] = system_msg
         else:
             self.messages.append(system_msg)
+
+    def set_rag_context(self, context: str | None) -> None:
+        """Set or clear RAG reference material and rebuild system message."""
+        self.rag_context = context
+        self._rebuild_system_message()
 
     def add_user_message(self, text: str) -> None:
         self.messages.append({"role": "user", "content": text})

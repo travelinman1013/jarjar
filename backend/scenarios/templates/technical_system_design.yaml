@@ -10,6 +10,9 @@ system_prompt: >
   Provide brief feedback after each major section.
   You are speaking over audio. Do NOT use emojis, asterisks, or markdown
   formatting. Use plain, conversational text.
+knowledge_collections:
+  - system_design
+  - distributed_systems
 focus_areas:
   - Requirements gathering
   - High-level architecture
