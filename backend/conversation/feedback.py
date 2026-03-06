@@ -5,6 +5,7 @@ Supports per-phase multi-dimensional scoring when rubrics are available,
 with fallback to legacy single-call evaluation.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -15,6 +16,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from storage.db import get_diagram_snapshot_for_phase
 from .llm import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
 
 logger = logging.getLogger(__name__)
@@ -224,6 +226,17 @@ async def generate_rubric_feedback(
                     )
             except Exception:
                 logger.warning("RAG retrieval failed for phase %s", phase_name)
+
+        # Diagram context injection
+        diagram = await asyncio.to_thread(
+            get_diagram_snapshot_for_phase, session_id, phase_name
+        )
+        if diagram and diagram["serialized_text"] and diagram["shape_count"] > 0:
+            prompt_parts.append(
+                f"\nCandidate's diagram at end of this phase:\n"
+                f"{diagram['serialized_text']}\n"
+                f"Consider the diagram quality when scoring architecture and design dimensions."
+            )
 
         prompt_parts.append(f"\nTranscript for this phase:\n{transcript_text}")
 

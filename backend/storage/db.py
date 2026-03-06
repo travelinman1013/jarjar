@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlmodel import Session as DBSession, SQLModel, create_engine, select
 
 from .models import (
+    DiagramSnapshot,
     PhaseScore,
     Score,
     Session,
@@ -283,6 +284,68 @@ def update_skill_observation(
             obs.fsrs_rating = fsrs_rating
             db.add(obs)
             db.commit()
+
+
+def save_diagram_snapshot(
+    session_id: int,
+    phase_name: str,
+    phase_display_name: str,
+    snapshot_json: str,
+    serialized_text: str,
+    shape_count: int,
+) -> DiagramSnapshot:
+    with DBSession(engine) as db:
+        snap = DiagramSnapshot(
+            session_id=session_id,
+            phase_name=phase_name,
+            phase_display_name=phase_display_name,
+            snapshot_json=snapshot_json,
+            serialized_text=serialized_text,
+            shape_count=shape_count,
+        )
+        db.add(snap)
+        db.commit()
+        db.refresh(snap)
+        return snap
+
+
+def get_diagram_snapshots_by_session_id(session_id: int) -> list[dict]:
+    with DBSession(engine) as db:
+        rows = db.exec(
+            select(DiagramSnapshot)
+            .where(DiagramSnapshot.session_id == session_id)
+            .order_by(DiagramSnapshot.created_at)
+        ).all()
+        return [
+            {
+                "phase_name": r.phase_name,
+                "phase_display_name": r.phase_display_name,
+                "snapshot_json": r.snapshot_json,
+                "serialized_text": r.serialized_text,
+                "shape_count": r.shape_count,
+            }
+            for r in rows
+        ]
+
+
+def get_diagram_snapshot_for_phase(
+    session_id: int, phase_name: str
+) -> dict | None:
+    with DBSession(engine) as db:
+        row = db.exec(
+            select(DiagramSnapshot)
+            .where(DiagramSnapshot.session_id == session_id)
+            .where(DiagramSnapshot.phase_name == phase_name)
+        ).first()
+        if not row:
+            return None
+        return {
+            "phase_name": row.phase_name,
+            "phase_display_name": row.phase_display_name,
+            "snapshot_json": row.snapshot_json,
+            "serialized_text": row.serialized_text,
+            "shape_count": row.shape_count,
+        }
 
 
 def get_session_with_transcripts(session_id: int) -> dict | None:

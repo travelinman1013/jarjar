@@ -2,6 +2,7 @@ name: distributed_cache
 type: technical
 difficulty: hard
 duration_minutes: 25
+whiteboard_enabled: true
 system_prompt: >
   You are a principal engineer conducting a deep-dive system design
   interview focused on distributed caching. Start by asking the candidate

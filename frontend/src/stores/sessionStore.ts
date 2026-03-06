@@ -26,6 +26,14 @@ export interface PhaseScoreData {
   stronger_answer: string
 }
 
+export interface DiagramSnapshotData {
+  phase_name: string
+  phase_display_name: string
+  snapshot_json: string
+  serialized_text: string
+  shape_count: number
+}
+
 export interface FeedbackData {
   overall_score: number
   clarity_score: number
@@ -54,8 +62,10 @@ interface SessionState {
   feedback: FeedbackData | null
   currentPhase: string | null
   phaseDisplayName: string | null
+  whiteboardEnabled: boolean
+  diagramSnapshots: DiagramSnapshotData[]
 
-  setSession: (id: number, scenario: string) => void
+  setSession: (id: number, scenario: string, whiteboardEnabled?: boolean) => void
   clearSession: () => void
   setRecording: (v: boolean) => void
   setConnected: (v: boolean) => void
@@ -66,6 +76,7 @@ interface SessionState {
   setFeedback: (f: FeedbackData) => void
   setView: (v: 'setup' | 'session' | 'review') => void
   setPhase: (phase: string, displayName: string) => void
+  setDiagramSnapshots: (snapshots: DiagramSnapshotData[]) => void
   addTranscript: (entry: TranscriptEntry) => void
   addBotSentence: (text: string, timestamp: number) => void
   reset: () => void
@@ -86,8 +97,10 @@ export const useSessionStore = create<SessionState>()((set) => ({
   feedback: null,
   currentPhase: null,
   phaseDisplayName: null,
+  whiteboardEnabled: false,
+  diagramSnapshots: [],
 
-  setSession: (id, scenario) =>
+  setSession: (id, scenario, whiteboardEnabled = false) =>
     set({
       sessionId: id,
       scenarioName: scenario,
@@ -102,6 +115,8 @@ export const useSessionStore = create<SessionState>()((set) => ({
       feedback: null,
       currentPhase: null,
       phaseDisplayName: null,
+      whiteboardEnabled,
+      diagramSnapshots: [],
     }),
   clearSession: () =>
     set({
@@ -118,6 +133,8 @@ export const useSessionStore = create<SessionState>()((set) => ({
       feedback: null,
       currentPhase: null,
       phaseDisplayName: null,
+      whiteboardEnabled: false,
+      diagramSnapshots: [],
     }),
   setRecording: (v) => set({ isRecording: v }),
   setConnected: (v) => set({ isConnected: v }),
@@ -128,6 +145,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
   setFeedback: (f) => set({ feedback: f }),
   setView: (v) => set({ view: v }),
   setPhase: (phase, displayName) => set({ currentPhase: phase, phaseDisplayName: displayName }),
+  setDiagramSnapshots: (snapshots) => set({ diagramSnapshots: snapshots }),
   addTranscript: (entry) =>
     set((state) => {
       // Replace existing entry with same turnId, or append
@@ -189,5 +207,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
       feedback: null,
       currentPhase: null,
       phaseDisplayName: null,
+      whiteboardEnabled: false,
+      diagramSnapshots: [],
     }),
 }))

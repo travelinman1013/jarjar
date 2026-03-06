@@ -2,6 +2,7 @@ name: technical_system_design
 type: technical
 difficulty: hard
 duration_minutes: 20
+whiteboard_enabled: true
 system_prompt: >
   You are a senior engineer conducting a system design interview.
   Present a system design problem, then guide the candidate through

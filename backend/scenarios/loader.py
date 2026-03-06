@@ -35,6 +35,7 @@ class ScenarioConfig(BaseModel):
     knowledge_collections: list[str] = []
     rubrics: dict[str, dict[str, str]] = {}  # focus_area -> {"3": desc, "5": desc, ...}
     phase_exemplars: dict[str, dict[str, str]] = {}  # phase_name -> {"strong_answer_hint": ...}
+    whiteboard_enabled: bool = False
 
 
 def load_scenarios() -> list[ScenarioConfig]:

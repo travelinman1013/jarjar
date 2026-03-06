@@ -1,11 +1,12 @@
-import type { PhaseScoreData } from '../../stores/sessionStore'
+import type { PhaseScoreData, DiagramSnapshotData } from '../../stores/sessionStore'
 import { PhaseCard } from './PhaseCard'
 
 interface Props {
   phaseScores: PhaseScoreData[]
+  diagramSnapshots: DiagramSnapshotData[]
 }
 
-export function PhaseTimeline({ phaseScores }: Props) {
+export function PhaseTimeline({ phaseScores, diagramSnapshots }: Props) {
   const sorted = [...phaseScores].sort((a, b) => a.phase_order - b.phase_order)
 
   return (
@@ -15,7 +16,11 @@ export function PhaseTimeline({ phaseScores }: Props) {
       </h3>
       <div className="space-y-3">
         {sorted.map((phase) => (
-          <PhaseCard key={phase.phase_name} phase={phase} />
+          <PhaseCard
+            key={phase.phase_name}
+            phase={phase}
+            diagramSnapshot={diagramSnapshots.find(d => d.phase_name === phase.phase_name)}
+          />
         ))}
       </div>
     </div>

@@ -1,8 +1,13 @@
-import { useState } from 'react'
-import type { PhaseScoreData } from '../../stores/sessionStore'
+import { useState, Suspense, lazy } from 'react'
+import type { PhaseScoreData, DiagramSnapshotData } from '../../stores/sessionStore'
+
+const DiagramViewer = lazy(() =>
+  import('./DiagramViewer').then(m => ({ default: m.DiagramViewer }))
+)
 
 interface Props {
   phase: PhaseScoreData
+  diagramSnapshot?: DiagramSnapshotData
 }
 
 const scoreColor = (score: number) => {
@@ -12,7 +17,7 @@ const scoreColor = (score: number) => {
   return 'bg-red-500'
 }
 
-export function PhaseCard({ phase }: Props) {
+export function PhaseCard({ phase, diagramSnapshot }: Props) {
   const [expanded, setExpanded] = useState(false)
 
   const avgScore =
@@ -22,6 +27,8 @@ export function PhaseCard({ phase }: Props) {
             phase.dimension_scores.length,
         )
       : 0
+
+  const hasDiagram = diagramSnapshot && diagramSnapshot.shape_count > 0
 
   return (
     <div className="bg-gray-800/50 border border-gray-700 rounded-lg overflow-hidden">
@@ -74,6 +81,19 @@ export function PhaseCard({ phase }: Props) {
               </div>
             ))}
           </div>
+
+          {/* Diagram Snapshot */}
+          {hasDiagram && (
+            <Suspense
+              fallback={
+                <div className="h-64 border border-gray-700 rounded-lg flex items-center justify-center text-gray-500">
+                  Loading diagram...
+                </div>
+              }
+            >
+              <DiagramViewer snapshotJson={diagramSnapshot.snapshot_json} />
+            </Suspense>
+          )}
 
           {/* Stronger Answer */}
           {phase.stronger_answer && (

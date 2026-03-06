@@ -17,6 +17,7 @@ from audio.vad import VoiceActivityDetector
 from audio.stt import SpeechToText
 from audio.tts import TextToSpeech
 from conversation.feedback import count_filler_words, generate_feedback_legacy, generate_rubric_feedback
+from diagram.serializer import serialize_tldraw_snapshot
 from conversation.llm import stream_chat_completion
 from conversation.manager import chunk_sentences
 from conversation.phases import InterviewConductor
@@ -27,10 +28,12 @@ from storage.db import (
     create_db_and_tables,
     create_session as db_create_session,
     add_transcript_entry,
+    get_diagram_snapshots_by_session_id,
     get_phase_scores_by_session_id,
     get_session_scenario,
     get_session_with_transcripts,
     get_score_by_session_id,
+    save_diagram_snapshot,
     save_phase_scores,
     save_score,
     update_session_duration,
@@ -116,7 +119,10 @@ async def get_session(session_id: int):
     phase_scores = await asyncio.to_thread(
         get_phase_scores_by_session_id, session_id
     )
-    return {**session_data, "score": score, "phase_scores": phase_scores}
+    diagrams = await asyncio.to_thread(
+        get_diagram_snapshots_by_session_id, session_id
+    )
+    return {**session_data, "score": score, "phase_scores": phase_scores, "diagrams": diagrams}
 
 
 @app.post("/api/sessions/{session_id}/analyze")
@@ -225,6 +231,11 @@ async def get_candidate_profile():
     return {**profile, "recommendations": recommendations}
 
 
+@app.get("/api/sessions/{session_id}/diagrams")
+async def get_session_diagrams(session_id: int):
+    return await asyncio.to_thread(get_diagram_snapshots_by_session_id, session_id)
+
+
 @app.post("/api/sessions")
 async def create_session(req: CreateSessionRequest):
     scenario = await asyncio.to_thread(get_scenario_by_name, req.scenario_name)
@@ -310,6 +321,7 @@ async def run_bot_response_with_routing(
     session_id: int | None = None,
     bot_turn_id: int = 0,
     phase: str | None = None,
+    diagram_state: dict | None = None,
 ):
     """Wraps run_bot_response with post-response phase evaluation."""
     await run_bot_response(websocket, conductor, session_id, bot_turn_id, phase)
@@ -317,6 +329,22 @@ async def run_bot_response_with_routing(
     if conductor.should_evaluate_transition():
         decision = await evaluate_phase_transition(conductor)
         if decision.should_advance and decision.next_phase:
+            # Capture diagram snapshot for the phase that just ended
+            if diagram_state and session_id and phase:
+                snapshot = diagram_state.get("snapshot")
+                if snapshot:
+                    old_phase_cfg = conductor.phases.get(phase)
+                    old_display = old_phase_cfg.display_name if old_phase_cfg else phase
+                    await asyncio.to_thread(
+                        save_diagram_snapshot,
+                        session_id,
+                        phase,
+                        old_display,
+                        json.dumps(snapshot),
+                        diagram_state.get("serialized_text", ""),
+                        diagram_state.get("shape_count", 0),
+                    )
+
             conductor.advance_phase(decision.next_phase)
             phase_cfg = conductor.phases.get(decision.next_phase)
             await websocket.send_json({
@@ -339,6 +367,7 @@ async def websocket_endpoint(websocket: WebSocket):
     session_id: int | None = None
     session_start_time: float | None = None
     knowledge_collections: list[str] = []
+    diagram_state: dict = {}  # mutable container: {snapshot, serialized_text, shape_count}
 
     try:
         while True:
@@ -405,6 +434,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 run_bot_response_with_routing(
                                     websocket, conductor, session_id, tid,
                                     conductor.current_phase,
+                                    diagram_state=diagram_state,
                                 )
                             )
 
@@ -449,6 +479,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     logger.info(f"Session started (id={session_id})")
                     await websocket.send_json({"type": "session.ready"})
 
+                elif msg_type == "diagram_state":
+                    snapshot = data.get("snapshot", {})
+                    shape_count = data.get("shape_count", 0)
+                    serialized = await asyncio.to_thread(
+                        serialize_tldraw_snapshot, snapshot
+                    )
+                    conductor.set_diagram_context(serialized)
+                    diagram_state["snapshot"] = snapshot
+                    diagram_state["serialized_text"] = serialized
+                    diagram_state["shape_count"] = shape_count
+
                 elif msg_type == "session.stop":
                     await cancel_bot_task(bot_response_task)
                     bot_response_task = None
@@ -471,6 +512,20 @@ async def websocket_endpoint(websocket: WebSocket):
                                     session_id, turn_id, "user", text, time.time(),
                                     conductor.current_phase,
                                 )
+
+                    # Capture diagram snapshot for the final phase
+                    if diagram_state.get("snapshot") and session_id and conductor.current_phase:
+                        phase_cfg = conductor.get_current_phase_config()
+                        display = phase_cfg.display_name if phase_cfg else conductor.current_phase
+                        await asyncio.to_thread(
+                            save_diagram_snapshot,
+                            session_id,
+                            conductor.current_phase,
+                            display,
+                            json.dumps(diagram_state["snapshot"]),
+                            diagram_state.get("serialized_text", ""),
+                            diagram_state.get("shape_count", 0),
+                        )
 
                     # Record session duration
                     if session_id and session_start_time:

@@ -106,7 +106,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     }
   }, [])
 
-  const sendControl = useCallback((msg: { type: string }) => {
+  const sendControl = useCallback((msg: Record<string, unknown>) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(msg))
     }

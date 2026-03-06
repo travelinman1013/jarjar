@@ -57,6 +57,19 @@ class PhaseScore(SQLModel, table=True):
     stronger_answer: str
 
 
+class DiagramSnapshot(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="session.id")
+    phase_name: str
+    phase_display_name: str
+    snapshot_json: str  # Full tldraw store snapshot for review rendering
+    serialized_text: str  # Pre-computed LLM-readable text
+    shape_count: int = 0
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+
 class SkillDimension(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(unique=True)  # normalized via .lower().strip()

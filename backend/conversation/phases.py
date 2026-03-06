@@ -47,6 +47,9 @@ class InterviewConductor:
         # RAG context (injected per-turn by retriever)
         self.rag_context: str | None = None
 
+        # Diagram context (injected on canvas changes)
+        self.diagram_context: str | None = None
+
         # Build initial system message
         self._rebuild_system_message()
 
@@ -62,6 +65,8 @@ class InterviewConductor:
             )
         if self.rag_context:
             prompt += f"\n\n{self.rag_context}"
+        if self.diagram_context:
+            prompt += f"\n\n{self.diagram_context}"
         system_msg = {"role": "system", "content": prompt}
         if self.messages:
             self.messages[0] = system_msg
@@ -71,6 +76,11 @@ class InterviewConductor:
     def set_rag_context(self, context: str | None) -> None:
         """Set or clear RAG reference material and rebuild system message."""
         self.rag_context = context
+        self._rebuild_system_message()
+
+    def set_diagram_context(self, context: str | None) -> None:
+        """Set or clear diagram description and rebuild system message."""
+        self.diagram_context = context
         self._rebuild_system_message()
 
     def add_user_message(self, text: str) -> None:

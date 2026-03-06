@@ -12,6 +12,7 @@ interface Scenario {
   system_prompt: string
   focus_areas: string[]
   evaluation_criteria: string[]
+  whiteboard_enabled?: boolean
 }
 
 const API_BASE = 'http://localhost:8000'
@@ -48,18 +49,18 @@ export function SessionSetup() {
     fetchProfile()
   }, [])
 
-  const handleSelect = async (scenarioName: string) => {
-    setStarting(scenarioName)
+  const handleSelect = async (scenario: Scenario) => {
+    setStarting(scenario.name)
     setError(null)
     try {
       const res = await fetch(`${API_BASE}/api/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenario_name: scenarioName }),
+        body: JSON.stringify({ scenario_name: scenario.name }),
       })
       if (!res.ok) throw new Error('Failed to create session')
       const data = await res.json()
-      setSession(data.session_id, data.scenario_name)
+      setSession(data.session_id, data.scenario_name, scenario.whiteboard_enabled ?? false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
       setStarting(null)
@@ -102,7 +103,7 @@ export function SessionSetup() {
             .map((s) => (
             <button
               key={s.name}
-              onClick={() => handleSelect(s.name)}
+              onClick={() => handleSelect(s)}
               disabled={starting !== null}
               className="text-left rounded-lg border border-gray-700 bg-gray-800 p-5 hover:bg-gray-700 hover:border-gray-600 transition-colors disabled:opacity-50 disabled:cursor-wait"
             >

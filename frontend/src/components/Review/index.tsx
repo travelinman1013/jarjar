@@ -23,6 +23,7 @@ export function Review() {
     )
   }
 
+  const diagramSnapshots = useSessionStore((s) => s.diagramSnapshots)
   const hasPhaseScores = feedback.phase_scores && feedback.phase_scores.length > 0
 
   return (
@@ -52,7 +53,7 @@ export function Review() {
         <OverallSummary feedback={feedback} />
 
         {hasPhaseScores && (
-          <PhaseTimeline phaseScores={feedback.phase_scores!} />
+          <PhaseTimeline phaseScores={feedback.phase_scores!} diagramSnapshots={diagramSnapshots} />
         )}
 
         <TranscriptReplay transcripts={transcripts} />

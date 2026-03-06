@@ -1,8 +1,12 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState, Suspense, lazy } from 'react'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useAudio } from '../../hooks/useAudio'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import { usePlayback } from '../../hooks/usePlayback'
+
+const WhiteboardPanel = lazy(() =>
+  import('./WhiteboardPanel').then(m => ({ default: m.WhiteboardPanel }))
+)
 
 // Subscribe to slices individually to avoid re-renders from vadActive changes
 function VadIndicator() {
@@ -104,8 +108,10 @@ function AnalyzingOverlay() {
 export function LiveSession() {
   const isRecording = useSessionStore((s) => s.isRecording)
   const scenarioName = useSessionStore((s) => s.scenarioName)
+  const whiteboardEnabled = useSessionStore((s) => s.whiteboardEnabled)
   const setRecording = useSessionStore((s) => s.setRecording)
   const setReady = useSessionStore((s) => s.setReady)
+  const [showWhiteboard, setShowWhiteboard] = useState(whiteboardEnabled)
 
   const { enqueue, flush } = usePlayback(24000)
 
@@ -140,6 +146,13 @@ export function LiveSession() {
     })
   }, [flush])
 
+  const handleDiagramChange = useCallback(
+    (snapshot: object, shapeCount: number) => {
+      sendControl({ type: 'diagram_state', snapshot, shape_count: shapeCount })
+    },
+    [sendControl],
+  )
+
   const handleStart = useCallback(() => {
     readyRef.current = false
     setRecording(true)
@@ -158,7 +171,7 @@ export function LiveSession() {
     await new Promise((r) => setTimeout(r, 1000))
     disconnect()
 
-    const { sessionId, setAnalyzing, setFeedback, setView } =
+    const { sessionId, setAnalyzing, setFeedback, setView, setDiagramSnapshots } =
       useSessionStore.getState()
     if (!sessionId) return
 
@@ -171,6 +184,19 @@ export function LiveSession() {
       if (!res.ok) throw new Error('Analysis failed')
       const data = await res.json()
       setFeedback(data)
+
+      // Fetch diagram snapshots for review
+      try {
+        const diagRes = await fetch(
+          `http://localhost:8000/api/sessions/${sessionId}/diagrams`,
+        )
+        if (diagRes.ok) {
+          setDiagramSnapshots(await diagRes.json())
+        }
+      } catch {
+        // Diagram fetch is non-critical
+      }
+
       setView('review')
     } catch (err) {
       console.error('Failed to analyze session:', err)
@@ -181,53 +207,75 @@ export function LiveSession() {
   }, [stopCapture, flush, sendControl, disconnect, setRecording, setReady])
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex h-screen">
       <AnalyzingOverlay />
 
-      <header className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-100">
-            Voice Interview Coach
-          </h1>
-          <div className="flex items-center gap-2">
-            {scenarioName && (
-              <span className="text-sm text-gray-400">
-                {scenarioName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-              </span>
+      <div className={`flex flex-col ${showWhiteboard ? 'w-1/2 border-r border-gray-800' : 'w-full'}`}>
+        <header className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-100">
+              Voice Interview Coach
+            </h1>
+            <div className="flex items-center gap-2">
+              {scenarioName && (
+                <span className="text-sm text-gray-400">
+                  {scenarioName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                </span>
+              )}
+              <PhaseIndicator />
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <BotSpeakingIndicator />
+            <VadIndicator />
+            {whiteboardEnabled && (
+              <button
+                onClick={() => setShowWhiteboard(v => !v)}
+                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                  showWhiteboard
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {showWhiteboard ? 'Hide Board' : 'Show Board'}
+              </button>
             )}
-            <PhaseIndicator />
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  isConnected ? 'bg-green-500' : 'bg-gray-600'
+                }`}
+              />
+              <span className="text-xs text-gray-500">
+                {isConnected ? 'Connected' : 'Disconnected'}
+              </span>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <BotSpeakingIndicator />
-          <VadIndicator />
-          <div className="flex items-center gap-2">
-            <div
-              className={`w-2 h-2 rounded-full ${
-                isConnected ? 'bg-green-500' : 'bg-gray-600'
-              }`}
-            />
-            <span className="text-xs text-gray-500">
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
-        </div>
-      </header>
+        </header>
 
-      <TranscriptList />
+        <TranscriptList />
 
-      <footer className="px-6 py-4 border-t border-gray-800">
-        <button
-          onClick={isRecording ? handleStop : handleStart}
-          className={`w-full py-3 rounded-lg font-medium transition-colors ${
-            isRecording
-              ? 'bg-red-600 hover:bg-red-700 text-white'
-              : 'bg-blue-600 hover:bg-blue-700 text-white'
-          }`}
-        >
-          {isRecording ? 'End & Review' : 'Start Recording'}
-        </button>
-      </footer>
+        <footer className="px-6 py-4 border-t border-gray-800">
+          <button
+            onClick={isRecording ? handleStop : handleStart}
+            className={`w-full py-3 rounded-lg font-medium transition-colors ${
+              isRecording
+                ? 'bg-red-600 hover:bg-red-700 text-white'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+          >
+            {isRecording ? 'End & Review' : 'Start Recording'}
+          </button>
+        </footer>
+      </div>
+
+      {showWhiteboard && (
+        <div className="w-1/2">
+          <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-500">Loading whiteboard...</div>}>
+            <WhiteboardPanel onDiagramChange={handleDiagramChange} />
+          </Suspense>
+        </div>
+      )}
     </div>
   )
 }
