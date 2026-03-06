@@ -98,6 +98,29 @@ export function OverallSummary({ feedback }: Props) {
           <p className="text-gray-200">{feedback.technical_accuracy_notes}</p>
         </div>
       )}
+
+      {/* Profile Updated Confirmation */}
+      {feedback.phase_scores && feedback.phase_scores.length > 0 && (
+        <div className="bg-indigo-900/20 border border-indigo-800/40 rounded-lg p-4">
+          <p className="text-sm text-indigo-300">
+            Your skill profile has been updated with scores from this session.
+          </p>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {[...new Set(
+              feedback.phase_scores.flatMap((ps) =>
+                ps.dimension_scores.map((ds) => ds.dimension),
+              ),
+            )].map((dim) => (
+              <span
+                key={dim}
+                className="text-xs bg-indigo-900/40 text-indigo-200 px-2 py-0.5 rounded capitalize"
+              >
+                {dim}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </>
   )
 }

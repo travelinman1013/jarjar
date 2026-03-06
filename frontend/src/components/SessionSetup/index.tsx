@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useSessionStore } from '../../stores/sessionStore'
+import { useProfileStore } from '../../stores/profileStore'
+import { SkillOverview } from './SkillOverview'
+import { RecommendationBadge } from './RecommendationBadge'
 
 interface Scenario {
   name: string
@@ -31,6 +34,7 @@ export function SessionSetup() {
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState<string | null>(null)
   const setSession = useSessionStore((s) => s.setSession)
+  const { dimensions, recommendations, fetchProfile } = useProfileStore()
 
   useEffect(() => {
     fetch(`${API_BASE}/api/scenarios`)
@@ -41,6 +45,7 @@ export function SessionSetup() {
       .then(setScenarios)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
+    fetchProfile()
   }, [])
 
   const handleSelect = async (scenarioName: string) => {
@@ -83,8 +88,18 @@ export function SessionSetup() {
           <p className="text-red-400 text-center mt-4">{error}</p>
         )}
 
+        <div className="max-w-3xl mx-auto">
+          <SkillOverview dimensions={dimensions} />
+        </div>
+
         <div className="grid gap-4 max-w-3xl mx-auto">
-          {scenarios.map((s) => (
+          {[...scenarios]
+            .sort((a, b) => {
+              const ua = recommendations.find((r) => r.scenario_name === a.name)?.urgency ?? 0
+              const ub = recommendations.find((r) => r.scenario_name === b.name)?.urgency ?? 0
+              return ub - ua
+            })
+            .map((s) => (
             <button
               key={s.name}
               onClick={() => handleSelect(s.name)}
@@ -116,9 +131,14 @@ export function SessionSetup() {
                 ))}
               </div>
 
-              <p className="text-sm text-gray-400">
-                {s.type.charAt(0).toUpperCase() + s.type.slice(1)} interview
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-gray-400">
+                  {s.type.charAt(0).toUpperCase() + s.type.slice(1)} interview
+                </p>
+                <RecommendationBadge
+                  recommendation={recommendations.find((r) => r.scenario_name === s.name)}
+                />
+              </div>
 
               {starting === s.name && (
                 <p className="text-sm text-blue-400 mt-2">Starting session...</p>

@@ -21,6 +21,7 @@ from conversation.llm import stream_chat_completion
 from conversation.manager import chunk_sentences
 from conversation.phases import InterviewConductor
 from conversation.router import evaluate_phase_transition
+from profile.manager import get_profile, get_recommendations, update_profile_from_session
 from scenarios.loader import load_scenarios, get_scenario_by_name
 from storage.db import (
     create_db_and_tables,
@@ -180,6 +181,11 @@ async def analyze_session(session_id: int):
                 save_phase_scores, session_id, result["phase_scores"]
             )
 
+        try:
+            await asyncio.to_thread(update_profile_from_session, session_id)
+        except Exception:
+            logger.warning("Profile update failed for session %s", session_id, exc_info=True)
+
         return {
             **summary,
             "filler_word_count": filler_count,
@@ -210,6 +216,13 @@ async def analyze_session(session_id: int):
         )
 
         return {**feedback, "filler_word_count": filler_count}
+
+
+@app.get("/api/profile")
+async def get_candidate_profile():
+    profile = await asyncio.to_thread(get_profile)
+    recommendations = await asyncio.to_thread(get_recommendations)
+    return {**profile, "recommendations": recommendations}
 
 
 @app.post("/api/sessions")

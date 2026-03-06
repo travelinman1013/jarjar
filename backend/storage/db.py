@@ -8,7 +8,14 @@ import json
 from sqlalchemy import text
 from sqlmodel import Session as DBSession, SQLModel, create_engine, select
 
-from .models import PhaseScore, Score, Session, TranscriptEntry
+from .models import (
+    PhaseScore,
+    Score,
+    Session,
+    SkillDimension,
+    SkillObservation,
+    TranscriptEntry,
+)
 
 DATABASE_URL = "sqlite:///sessions.db"
 
@@ -189,6 +196,93 @@ def get_phase_scores_by_session_id(session_id: int) -> list[dict]:
             }
             for r in rows
         ]
+
+
+def upsert_skill_dimension(
+    name: str,
+    current_score: float,
+    session_count: int,
+    last_practiced,
+    fsrs_card_json: str,
+) -> SkillDimension:
+    with DBSession(engine) as db:
+        existing = db.exec(
+            select(SkillDimension).where(SkillDimension.name == name)
+        ).first()
+        if existing:
+            existing.current_score = current_score
+            existing.session_count = session_count
+            existing.last_practiced = last_practiced
+            existing.fsrs_card_json = fsrs_card_json
+            db.add(existing)
+            db.commit()
+            db.refresh(existing)
+            return existing
+        dim = SkillDimension(
+            name=name,
+            current_score=current_score,
+            session_count=session_count,
+            last_practiced=last_practiced,
+            fsrs_card_json=fsrs_card_json,
+        )
+        db.add(dim)
+        db.commit()
+        db.refresh(dim)
+        return dim
+
+
+def get_all_skill_dimensions() -> list[SkillDimension]:
+    with DBSession(engine) as db:
+        return list(db.exec(select(SkillDimension)).all())
+
+
+def get_skill_dimension_by_name(name: str) -> SkillDimension | None:
+    with DBSession(engine) as db:
+        return db.exec(
+            select(SkillDimension).where(SkillDimension.name == name)
+        ).first()
+
+
+def get_skill_observations_by_session(session_id: int) -> list[SkillObservation]:
+    with DBSession(engine) as db:
+        return list(db.exec(
+            select(SkillObservation).where(
+                SkillObservation.session_id == session_id
+            )
+        ).all())
+
+
+def create_skill_observation(
+    skill_dimension_id: int,
+    session_id: int,
+    score: float,
+    fsrs_rating: int,
+) -> SkillObservation:
+    with DBSession(engine) as db:
+        obs = SkillObservation(
+            skill_dimension_id=skill_dimension_id,
+            session_id=session_id,
+            score=score,
+            fsrs_rating=fsrs_rating,
+        )
+        db.add(obs)
+        db.commit()
+        db.refresh(obs)
+        return obs
+
+
+def update_skill_observation(
+    observation_id: int,
+    score: float,
+    fsrs_rating: int,
+) -> None:
+    with DBSession(engine) as db:
+        obs = db.get(SkillObservation, observation_id)
+        if obs:
+            obs.score = score
+            obs.fsrs_rating = fsrs_rating
+            db.add(obs)
+            db.commit()
 
 
 def get_session_with_transcripts(session_id: int) -> dict | None:

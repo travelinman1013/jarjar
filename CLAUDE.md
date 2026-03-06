@@ -67,7 +67,8 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 - `GET /api/scenarios` — List available interview scenarios
 - `POST /api/sessions` — Create a new session (body: `{ scenario_name }`)
 - `GET /api/sessions/{id}` — Get session details, transcripts, score, and phase_scores
-- `POST /api/sessions/{id}/analyze` — Run post-session LLM feedback analysis (idempotent). Returns per-phase rubric scores when scenario has rubrics, otherwise legacy 3-dimension scores
+- `POST /api/sessions/{id}/analyze` — Run post-session LLM feedback analysis (idempotent). Returns per-phase rubric scores when scenario has rubrics, otherwise legacy 3-dimension scores. Also updates the candidate skill profile via FSRS when phase scores are present.
+- `GET /api/profile` — Get candidate skill profile with per-dimension scores, FSRS retrievability, and scenario recommendations sorted by urgency
 
 ### Backend (`backend/`)
 - **`main.py`** — FastAPI entrypoint. Loads `.env` via python-dotenv before imports. Global `SpeechToText`, `TextToSpeech`, and `KnowledgeRetriever` instances loaded at startup; per-connection `VoiceActivityDetector` and `InterviewConductor`. Heavy ops run via `asyncio.to_thread()`.
@@ -83,9 +84,12 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 - **`knowledge/store.py`** — Qdrant vector store in local disk mode (no server). Collection-per-topic namespacing, cosine distance. All operations are synchronous (callers use `asyncio.to_thread()`).
 - **`knowledge/retriever.py`** — High-level RAG orchestrator. Embeds query, searches Qdrant, filters by distance threshold (0.8 max), formats chunks for system prompt injection. Returns `None` for irrelevant queries.
 - **`knowledge/ingest.py`** — CLI tool for ingesting markdown/text documents into the vector store. Uses `RecursiveCharacterTextSplitter` for chunking.
+- **`profile/__init__.py`** — Candidate skill profile package.
+- **`profile/fsrs_engine.py`** — FSRS spaced repetition wrapper using `py-fsrs`. Maps 0-10 rubric scores to FSRS ratings (Again/Hard/Good/Easy). `review_skill()` advances a card's scheduling state, `compute_retrievability()` returns current recall probability.
+- **`profile/manager.py`** — Profile CRUD and recommendation logic. `update_profile_from_session()` aggregates per-phase dimension scores into the skill profile using EMA scoring (alpha=0.4) and FSRS card advancement. Idempotent: re-analysis updates scores but skips FSRS advancement. Dimension names normalized via `.lower().strip()`. `get_profile()` returns all dimensions with retrievability. `get_recommendations()` ranks scenarios by urgency (low retrievability + low scores + unpracticed dimensions).
 - **`scenarios/loader.py`** — Loads YAML scenario configs from `scenarios/templates/`. Each has `system_prompt`, `focus_areas`, `evaluation_criteria`, `phases`, `knowledge_collections`, `rubrics` (per-focus-area scoring anchors at levels 3/5/7/9), and `phase_exemplars` (strong answer hints per phase).
-- **`storage/models.py`** — SQLModel tables: `Session`, `TranscriptEntry` (with `phase` column for per-phase transcript grouping), `Score` (with `technical_accuracy_notes` and `dimension_names` for dynamic radar chart), `PhaseScore` (per-phase rubric evaluation results with JSON `dimension_scores`).
-- **`storage/db.py`** — SQLite CRUD helpers (all synchronous, called via `asyncio.to_thread()`). Includes `_run_migrations()` for additive schema changes on existing databases. `save_phase_scores()` / `get_phase_scores_by_session_id()` for per-phase rubric data.
+- **`storage/models.py`** — SQLModel tables: `Session`, `TranscriptEntry` (with `phase` column for per-phase transcript grouping), `Score` (with `technical_accuracy_notes` and `dimension_names` for dynamic radar chart), `PhaseScore` (per-phase rubric evaluation results with JSON `dimension_scores`), `SkillDimension` (per-skill EMA score, session count, FSRS card state), `SkillObservation` (per-session-per-dimension score audit trail with FSRS rating).
+- **`storage/db.py`** — SQLite CRUD helpers (all synchronous, called via `asyncio.to_thread()`). Includes `_run_migrations()` for additive schema changes on existing databases. `save_phase_scores()` / `get_phase_scores_by_session_id()` for per-phase rubric data. `upsert_skill_dimension()` / `get_all_skill_dimensions()` / `create_skill_observation()` / `get_skill_observations_by_session()` for skill profile persistence.
 
 ### Frontend (`frontend/`)
 - **`public/audio-processor.js`** — AudioWorklet processor. Must be plain JS (not bundled). Converts Float32→Int16, buffers 1600 samples (100ms) before posting.
@@ -93,9 +97,10 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 - **`src/hooks/useWebSocket.ts`** — Manages WS lifecycle. Auto-sends `session.start` on connect. Dispatches incoming JSON to Zustand store.
 - **`src/hooks/usePlayback.ts`** — Queue-based audio playback at 24kHz for bot TTS audio. Gapless scheduling with flush support for barge-in.
 - **`src/stores/sessionStore.ts`** — Zustand store: `view` (setup/session/review), `sessionId`, `transcripts[]`, `feedback`, `isAnalyzing`. Three-way view routing. `FeedbackData` interface includes optional `phase_scores` (per-phase rubric evaluations), `dimensions` (dynamic focus area names), and `technical_accuracy_notes`. `DimensionScore` and `PhaseScoreData` interfaces for typed phase evaluation data.
-- **`src/components/SessionSetup/`** — Scenario selection screen.
+- **`src/stores/profileStore.ts`** — Zustand store for candidate skill profile. Fetches from `GET /api/profile`. Holds `SkillDimensionData[]` (name, score, session count, last practiced, retrievability) and `RecommendationData[]` (scenario name, urgency, weak/due dimensions).
+- **`src/components/SessionSetup/`** — Scenario selection screen with skill profile overview and recommendation badges. `SkillOverview` renders collapsible horizontal skill bars color-coded by FSRS retrievability. `RecommendationBadge` shows urgency pills on scenario cards. Scenarios sorted by recommendation urgency.
 - **`src/components/LiveSession/`** — Active interview UI. `VadIndicator`, `BotSpeakingIndicator`, `TranscriptList` subscribe to individual store slices to prevent re-renders. "End & Review" triggers async analysis flow.
-- **`src/components/Review/`** — Post-session dashboard. Split into sub-components: `OverallSummary` (dynamic radar chart adapting to scenario focus areas, overall score, feedback cards, technical accuracy notes), `PhaseTimeline` (vertical list of expandable `PhaseCard` components with per-dimension score bars, evidence quotes, and stronger answer suggestions), `TranscriptReplay` (phase-grouped transcript with dividers). Falls back to legacy 3-dimension radar when phase scores are unavailable.
+- **`src/components/Review/`** — Post-session dashboard. Split into sub-components: `OverallSummary` (dynamic radar chart adapting to scenario focus areas, overall score, feedback cards, technical accuracy notes, profile-updated confirmation with dimension tags), `PhaseTimeline` (vertical list of expandable `PhaseCard` components with per-dimension score bars, evidence quotes, and stronger answer suggestions), `TranscriptReplay` (phase-grouped transcript with dividers). Falls back to legacy 3-dimension radar when phase scores are unavailable.
 
 ## Key Conventions
 
@@ -112,3 +117,7 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 - RAG knowledge base is optional — app works without Ollama or ingested content (graceful degradation)
 - Qdrant vector store persists at `backend/knowledge/qdrant_db/` (gitignored)
 - Knowledge base content lives in `backend/knowledge/content/` organized by topic subdirectory
+- Candidate skill profile uses FSRS (`py-fsrs`) spaced repetition for scheduling practice recommendations
+- Skill dimension names are normalized (`.lower().strip()`) to prevent duplicates across scenario YAMLs
+- Profile scoring uses EMA (alpha=0.4) so recent sessions are weighted heavily over early poor performance
+- Profile update is idempotent — re-analyzing a session updates observation scores but does not re-advance FSRS cards

@@ -168,12 +168,27 @@ After each session, the LLM reviews the transcript in a multi-pass evaluation us
 
 **Trend tracking:** SQLite stores scores, per-phase evaluations (`PhaseScore` table), and phase-annotated transcripts for review.
 
+### 3b. Adaptive Candidate Skill Profile & Spaced Repetition
+
+Cross-session skill tracking with FSRS spaced repetition scheduling.
+
+**How it works:**
+- After each analyzed session, per-phase dimension scores are aggregated into a persistent `SkillDimension` profile
+- Scores use EMA (alpha=0.4) so recent performance is weighted heavily over early sessions
+- Each dimension is tracked as an FSRS card — the scheduler computes when each skill is due for review based on recall probability (retrievability)
+- The setup screen shows a collapsible Skill Overview with horizontal bars color-coded by retrievability (green > 0.8, yellow 0.5-0.8, red < 0.5)
+- Scenarios are sorted by recommendation urgency — combining low retrievability (due for review) and low scores (weak areas) with a bonus for never-practiced dimensions
+- Profile updates are idempotent: re-analyzing a session updates scores but does not re-advance FSRS intervals
+- Single implicit global profile (single-tenant local-first app, no user accounts)
+
 ### 4. Polished UI
 
 Three main screens:
 
 **Session Setup Screen:**
-- Scenario selector (cards with type, difficulty, description)
+- Skill Profile overview (collapsible, shows per-dimension score bars with FSRS retrievability)
+- Scenario selector (cards with type, difficulty, description, recommendation badges)
+- Scenarios sorted by recommendation urgency (weak/due skills prioritized)
 - Quick-start for recent/favorite scenarios
 - Custom scenario builder
 - Audio input device selector + mic test
@@ -302,9 +317,12 @@ voice-interview-coach/
 │   ├── scenarios/
 │   │   ├── loader.py           # YAML scenario parser
 │   │   └── templates/          # Built-in scenario YAML files
+│   ├── profile/
+│   │   ├── fsrs_engine.py      # FSRS spaced repetition wrapper
+│   │   └── manager.py          # Skill profile CRUD + recommendations
 │   ├── storage/
 │   │   ├── db.py               # SQLite connection + migrations
-│   │   └── models.py           # Session, transcript, score models
+│   │   └── models.py           # Session, transcript, score, skill models
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
@@ -335,4 +353,4 @@ voice-interview-coach/
 
 4. **Electron vs. browser** — Starting as a web app (localhost) is simpler. Could wrap in Electron later for a native feel if desired.
 
-5. **Conversation memory across sessions** — Should the coach remember past sessions and adapt? (e.g., "Last time you struggled with consistency models, let's revisit that.") Nice-to-have for Phase 6.
+5. **Conversation memory across sessions** — ✅ Implemented via adaptive skill profile. FSRS tracks per-dimension scores across sessions and recommends what to practice next based on retrievability decay.

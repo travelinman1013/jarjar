@@ -55,3 +55,23 @@ class PhaseScore(SQLModel, table=True):
     dimension_scores: str  # JSON: [{dimension, score, rubric_level, evidence_quote, suggestion}]
     phase_summary: str
     stronger_answer: str
+
+
+class SkillDimension(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True)  # normalized via .lower().strip()
+    current_score: float = 0.0  # EMA-weighted score 0-10
+    session_count: int = 0
+    last_practiced: Optional[datetime] = None
+    fsrs_card_json: str = ""  # serialized FSRS Card
+
+
+class SkillObservation(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    skill_dimension_id: int = Field(foreign_key="skilldimension.id")
+    session_id: int = Field(foreign_key="session.id")
+    score: float  # avg score for this dimension in this session
+    fsrs_rating: int  # FSRS Rating enum value (1-4)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
