@@ -162,14 +162,20 @@ export const useSessionStore = create<SessionState>()((set) => ({
   addBotSentence: (text, timestamp) =>
     set((state) => {
       // Accumulate bot sentences into a single transcript entry per response
-      const lastBot = [...state.transcripts]
-        .reverse()
-        .find((t) => t.speaker === 'bot')
-      if (lastBot && state.isBotSpeaking) {
-        // Append to existing bot message
-        const idx = state.transcripts.indexOf(lastBot)
+      const lastBotIdx = state.transcripts.findLastIndex(
+        (t) => t.speaker === 'bot',
+      )
+      const lastBot = lastBotIdx >= 0 ? state.transcripts[lastBotIdx] : null
+
+      // Check if a user message arrived after the last bot message — if so, this is a new response
+      const hasUserSinceLast =
+        lastBotIdx >= 0 &&
+        state.transcripts.slice(lastBotIdx + 1).some((t) => t.speaker === 'user')
+
+      if (lastBot && state.isBotSpeaking && !hasUserSinceLast) {
+        // Append to existing bot message (continuation of current response)
         const updated = [...state.transcripts]
-        updated[idx] = {
+        updated[lastBotIdx] = {
           ...lastBot,
           text: lastBot.text + ' ' + text,
           timestamp,
