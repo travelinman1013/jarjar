@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from audio.vad import VoiceActivityDetector
 from audio.stt import SpeechToText
 from audio.tts import TextToSpeech
-from conversation.feedback import count_filler_words, generate_feedback
+from conversation.feedback import count_filler_words, generate_feedback_legacy, generate_rubric_feedback
 from conversation.llm import stream_chat_completion
 from conversation.manager import chunk_sentences
 from conversation.phases import InterviewConductor
@@ -26,9 +26,11 @@ from storage.db import (
     create_db_and_tables,
     create_session as db_create_session,
     add_transcript_entry,
+    get_phase_scores_by_session_id,
     get_session_scenario,
     get_session_with_transcripts,
     get_score_by_session_id,
+    save_phase_scores,
     save_score,
     update_session_duration,
 )
@@ -110,7 +112,10 @@ async def get_session(session_id: int):
     if not session_data:
         raise HTTPException(status_code=404, detail="Session not found")
     score = await asyncio.to_thread(get_score_by_session_id, session_id)
-    return {**session_data, "score": score}
+    phase_scores = await asyncio.to_thread(
+        get_phase_scores_by_session_id, session_id
+    )
+    return {**session_data, "score": score, "phase_scores": phase_scores}
 
 
 @app.post("/api/sessions/{session_id}/analyze")
@@ -125,33 +130,86 @@ async def analyze_session(session_id: int):
 
     existing = await asyncio.to_thread(get_score_by_session_id, session_id)
     if existing:
+        # Also return phase scores if available
+        phase_scores = await asyncio.to_thread(
+            get_phase_scores_by_session_id, session_id
+        )
+        if phase_scores:
+            existing["phase_scores"] = phase_scores
+            existing["dimensions"] = existing.get("dimension_names", [])
         return existing
 
     scenario = await asyncio.to_thread(
         get_scenario_by_name, session_data["scenario_name"]
     )
     evaluation_criteria = scenario.evaluation_criteria if scenario else []
-
     filler_count = count_filler_words(transcripts)
-    feedback = await generate_feedback(
-        session_id, transcripts, session_data["scenario_name"], evaluation_criteria,
-        retriever=knowledge_retriever,
-        knowledge_collections=scenario.knowledge_collections if scenario else [],
-    )
 
-    await asyncio.to_thread(
-        save_score,
-        session_id,
-        feedback.get("overall_score", 5),
-        feedback.get("clarity_score", 5),
-        feedback.get("structure_score", 5),
-        feedback.get("depth_score", 5),
-        feedback.get("best_moment", ""),
-        feedback.get("biggest_opportunity", ""),
-        filler_count,
-    )
+    if scenario and scenario.rubrics:
+        # Rubric-based multi-phase evaluation
+        result = await generate_rubric_feedback(
+            session_id,
+            transcripts,
+            session_data["scenario_name"],
+            scenario.focus_areas,
+            evaluation_criteria,
+            scenario.rubrics,
+            scenario.phase_exemplars,
+            phases_config=scenario.phases,
+            retriever=knowledge_retriever,
+            knowledge_collections=scenario.knowledge_collections,
+        )
 
-    return {**feedback, "filler_word_count": filler_count}
+        summary = result["summary"]
+        await asyncio.to_thread(
+            save_score,
+            session_id,
+            summary.get("overall_score", 5),
+            summary.get("clarity_score", 5),
+            summary.get("structure_score", 5),
+            summary.get("depth_score", 5),
+            summary.get("best_moment", ""),
+            summary.get("biggest_opportunity", ""),
+            filler_count,
+            summary.get("technical_accuracy_notes", ""),
+            json.dumps(result["dimensions"]),
+        )
+
+        if result["phase_scores"]:
+            await asyncio.to_thread(
+                save_phase_scores, session_id, result["phase_scores"]
+            )
+
+        return {
+            **summary,
+            "filler_word_count": filler_count,
+            "phase_scores": result["phase_scores"],
+            "dimensions": result["dimensions"],
+        }
+    else:
+        # Legacy single-call evaluation
+        feedback = await generate_feedback_legacy(
+            session_id,
+            transcripts,
+            session_data["scenario_name"],
+            evaluation_criteria,
+            retriever=knowledge_retriever,
+            knowledge_collections=scenario.knowledge_collections if scenario else [],
+        )
+
+        await asyncio.to_thread(
+            save_score,
+            session_id,
+            feedback.get("overall_score", 5),
+            feedback.get("clarity_score", 5),
+            feedback.get("structure_score", 5),
+            feedback.get("depth_score", 5),
+            feedback.get("best_moment", ""),
+            feedback.get("biggest_opportunity", ""),
+            filler_count,
+        )
+
+        return {**feedback, "filler_word_count": filler_count}
 
 
 @app.post("/api/sessions")
@@ -171,6 +229,7 @@ async def run_bot_response(
     conversation: InterviewConductor,
     session_id: int | None = None,
     bot_turn_id: int = 0,
+    phase: str | None = None,
 ):
     """LLM -> sentence chunking -> TTS -> WebSocket binary send."""
     raw_tokens: list[str] = []
@@ -205,6 +264,7 @@ async def run_bot_response(
                 await asyncio.to_thread(
                     add_transcript_entry,
                     session_id, bot_turn_id, "bot", raw_response, time.time(),
+                    phase,
                 )
         await websocket.send_json({"type": "bot_speech_stop"})
 
@@ -216,6 +276,7 @@ async def run_bot_response(
                 await asyncio.to_thread(
                     add_transcript_entry,
                     session_id, bot_turn_id, "bot", raw_response, time.time(),
+                    phase,
                 )
         raise
 
@@ -235,9 +296,10 @@ async def run_bot_response_with_routing(
     conductor: InterviewConductor,
     session_id: int | None = None,
     bot_turn_id: int = 0,
+    phase: str | None = None,
 ):
     """Wraps run_bot_response with post-response phase evaluation."""
-    await run_bot_response(websocket, conductor, session_id, bot_turn_id)
+    await run_bot_response(websocket, conductor, session_id, bot_turn_id, phase)
 
     if conductor.should_evaluate_transition():
         decision = await evaluate_phase_transition(conductor)
@@ -303,6 +365,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 await asyncio.to_thread(
                                     add_transcript_entry,
                                     session_id, tid, "user", text, time.time(),
+                                    conductor.current_phase,
                                 )
 
                             # Feed to conductor and spawn bot response
@@ -328,6 +391,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             bot_response_task = asyncio.create_task(
                                 run_bot_response_with_routing(
                                     websocket, conductor, session_id, tid,
+                                    conductor.current_phase,
                                 )
                             )
 
@@ -392,6 +456,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 await asyncio.to_thread(
                                     add_transcript_entry,
                                     session_id, turn_id, "user", text, time.time(),
+                                    conductor.current_phase,
                                 )
 
                     # Record session duration

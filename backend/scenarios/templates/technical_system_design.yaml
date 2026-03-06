@@ -23,6 +23,44 @@ evaluation_criteria:
   - Considers scalability and reliability
   - Articulates trade-offs clearly
   - Communicates design decisions effectively
+rubrics:
+  Requirements gathering:
+    "3": "Jumps into design without asking questions. Misses key constraints like scale or latency."
+    "5": "Asks a few clarifying questions but misses non-functional requirements or makes assumptions."
+    "7": "Systematically asks about users, scale, latency, and feature priorities. Identifies key constraints."
+    "9": "Drives requirements like a senior engineer. Prioritizes, identifies edge cases, and proposes scope boundaries."
+  High-level architecture:
+    "3": "Vague description of components. No clear data flow or API boundaries."
+    "5": "Names appropriate components but connections between them are hand-wavy."
+    "7": "Clear component diagram with data flow, API contracts, and storage choices justified."
+    "9": "Elegant architecture with clear separation of concerns, appropriate technology choices with trade-off justification."
+  Trade-off analysis:
+    "3": "Cannot articulate trade-offs when asked."
+    "5": "Acknowledges trade-offs exist but does not compare alternatives."
+    "7": "Compares two or more alternatives with pros and cons for each."
+    "9": "Frames trade-offs in terms of business impact, quantifies where possible, and makes a reasoned choice."
+  Scalability considerations:
+    "3": "Does not mention scaling at all."
+    "5": "Mentions scaling needs but no concrete approach."
+    "7": "Proposes horizontal scaling, caching, or sharding with reasonable justification."
+    "9": "Comprehensive scaling strategy covering read and write paths, hot spots, and capacity planning."
+phase_exemplars:
+  requirements:
+    strong_answer_hint: >
+      A strong candidate asks about expected QPS, read-write ratio, latency SLAs,
+      data durability requirements, and geographic distribution before proposing any architecture.
+  high_level_design:
+    strong_answer_hint: >
+      A strong candidate walks through the API layer, storage layer, caching layer,
+      and async processing pipeline with clear data flow between each component.
+  deep_dive:
+    strong_answer_hint: >
+      A strong candidate discusses specific data structures, algorithms, consistency
+      models, and failure modes for the chosen component with concrete numbers.
+  curveball:
+    strong_answer_hint: >
+      A strong candidate systematically addresses the failure scenario with detection,
+      mitigation, and recovery steps, referencing their earlier design choices.
 phases:
   - name: opening
     display_name: Opening

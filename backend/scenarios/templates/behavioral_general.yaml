@@ -21,6 +21,40 @@ evaluation_criteria:
   - Provides specific examples
   - Demonstrates self-awareness
   - Concise and structured responses
+rubrics:
+  Leadership:
+    "3": "Cannot provide a leadership example or describes passive followership."
+    "5": "Gives a vague leadership example without describing personal influence."
+    "7": "Describes a specific leadership moment with clear personal actions and team impact."
+    "9": "Demonstrates strategic leadership with measurable outcomes, stakeholder management, and lessons learned."
+  Teamwork:
+    "3": "Only uses 'we' with no individual contribution clarity."
+    "5": "Describes team context but individual role is unclear."
+    "7": "Clearly distinguishes personal contribution within team context with specific examples."
+    "9": "Shows cross-functional collaboration, conflict navigation within teams, and quantified team outcomes."
+  Conflict resolution:
+    "3": "Avoids conflict examples or describes passive avoidance."
+    "5": "Acknowledges a conflict but resolution approach is vague."
+    "7": "Describes a specific conflict with clear steps taken to resolve it and relationship preservation."
+    "9": "Demonstrates empathy, active listening, and a structured resolution that improved the working relationship."
+  Problem-solving:
+    "3": "Cannot describe a problem-solving approach or gives a trivial example."
+    "5": "Describes a problem but the solution process is unclear or reactive."
+    "7": "Walks through a structured problem-solving approach with alternatives considered."
+    "9": "Demonstrates systematic analysis, creative solutions, and measurable results with lessons applied elsewhere."
+phase_exemplars:
+  star_situation:
+    strong_answer_hint: >
+      A strong candidate sets the scene with specific context, timeline, stakes,
+      and their role, making the situation vivid and relevant to the question asked.
+  star_action:
+    strong_answer_hint: >
+      A strong candidate uses 'I' not 'we', describes specific actions with reasoning,
+      mentions alternatives considered, and shows decision-making process.
+  star_result:
+    strong_answer_hint: >
+      A strong candidate provides measurable outcomes, reflects on what they learned,
+      and explains how they would apply lessons to future situations.
 phases:
   - name: opening
     display_name: Opening

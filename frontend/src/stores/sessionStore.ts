@@ -6,6 +6,24 @@ export interface TranscriptEntry {
   isFinal: boolean
   timestamp: number
   speaker: 'user' | 'bot'
+  phase?: string
+}
+
+export interface DimensionScore {
+  dimension: string
+  score: number
+  rubric_level: string
+  evidence_quote: string
+  suggestion: string
+}
+
+export interface PhaseScoreData {
+  phase_name: string
+  phase_display_name: string
+  phase_order: number
+  dimension_scores: DimensionScore[]
+  phase_summary: string
+  stronger_answer: string
 }
 
 export interface FeedbackData {
@@ -16,6 +34,9 @@ export interface FeedbackData {
   best_moment: string
   biggest_opportunity: string
   filler_word_count: number
+  phase_scores?: PhaseScoreData[]
+  dimensions?: string[]
+  technical_accuracy_notes?: string
 }
 
 interface SessionState {

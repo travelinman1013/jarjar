@@ -25,6 +25,47 @@ evaluation_criteria:
   - Articulates consistency vs availability trade-offs
   - Proposes concrete partitioning strategy
   - Considers real-world failure scenarios
+rubrics:
+  Cache eviction strategies (LRU, LFU, TTL):
+    "3": "Cannot explain any eviction policy or confuses them."
+    "5": "Names LRU but cannot explain implementation or compare alternatives."
+    "7": "Explains LRU and LFU with data structure choices and compares their hit-rate trade-offs."
+    "9": "Deep understanding of eviction policies including adaptive approaches, implementation with O(1) operations, and workload-dependent selection."
+  Data partitioning and consistent hashing:
+    "3": "No partitioning strategy or suggests naive modulo hashing."
+    "5": "Mentions consistent hashing but cannot explain virtual nodes or rebalancing."
+    "7": "Explains consistent hashing with virtual nodes and discusses rebalancing when nodes join or leave."
+    "9": "Addresses hot keys, weighted virtual nodes, and bounded-load consistent hashing with concrete examples."
+  Replication and consistency models:
+    "3": "No mention of replication or consistency guarantees."
+    "5": "Mentions replication but hand-waves on consistency model."
+    "7": "Compares eventual vs strong consistency, discusses write propagation and read-your-writes guarantees."
+    "9": "Articulates CAP trade-offs specific to caching, proposes tunable consistency, and addresses conflict resolution."
+  Failure detection and recovery:
+    "3": "Does not consider failure scenarios."
+    "5": "Acknowledges nodes can fail but no concrete detection or recovery plan."
+    "7": "Proposes heartbeat-based failure detection, discusses thundering herd mitigation and cache warming."
+    "9": "Comprehensive failure handling with gossip protocols, circuit breakers, graceful degradation, and automated recovery."
+phase_exemplars:
+  eviction_design:
+    strong_answer_hint: >
+      A strong candidate compares LRU, LFU, and TTL with data structure choices
+      (doubly-linked list + hashmap for O(1) LRU), discusses adaptive policies,
+      and considers memory overhead of metadata.
+  partitioning:
+    strong_answer_hint: >
+      A strong candidate explains consistent hashing with virtual nodes, discusses
+      what happens during node addition/removal, and addresses hot key mitigation
+      strategies like key splitting or local caching.
+  consistency:
+    strong_answer_hint: >
+      A strong candidate frames the discussion around CAP theorem applied to caching,
+      proposes a specific consistency model with justification, and discusses
+      read-after-write consistency guarantees.
+  failure_scenarios:
+    strong_answer_hint: >
+      A strong candidate addresses node crash detection via heartbeats, thundering herd
+      prevention with request coalescing, and cache warming strategies for recovery.
 phases:
   - name: opening
     display_name: Opening

@@ -25,6 +25,7 @@ class TranscriptEntry(SQLModel, table=True):
     speaker: str  # "user" or "bot"
     text: str
     timestamp: float
+    phase: Optional[str] = None
 
     session: Optional[Session] = Relationship(back_populates="transcripts")
 
@@ -39,5 +40,18 @@ class Score(SQLModel, table=True):
     best_moment: str
     biggest_opportunity: str
     filler_word_count: int
+    technical_accuracy_notes: str = ""
+    dimension_names: str = ""  # JSON list of dynamic dimension names
 
     session: Optional[Session] = Relationship(back_populates="score")
+
+
+class PhaseScore(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="session.id")
+    phase_name: str
+    phase_display_name: str
+    phase_order: int
+    dimension_scores: str  # JSON: [{dimension, score, rubric_level, evidence_quote, suggestion}]
+    phase_summary: str
+    stronger_answer: str

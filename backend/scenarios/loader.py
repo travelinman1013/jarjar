@@ -33,6 +33,8 @@ class ScenarioConfig(BaseModel):
     evaluation_criteria: list[str]
     phases: list[PhaseConfig] = []
     knowledge_collections: list[str] = []
+    rubrics: dict[str, dict[str, str]] = {}  # focus_area -> {"3": desc, "5": desc, ...}
+    phase_exemplars: dict[str, dict[str, str]] = {}  # phase_name -> {"strong_answer_hint": ...}
 
 
 def load_scenarios() -> list[ScenarioConfig]:

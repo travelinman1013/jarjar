@@ -18,6 +18,22 @@ evaluation_criteria:
   - Clear and concise self-introduction
   - Authentic enthusiasm
   - Relevant highlights mentioned
+rubrics:
+  Self-introduction:
+    "3": "Rambling or unfocused introduction with no clear narrative."
+    "5": "Covers basic background but lacks a compelling thread or focus."
+    "7": "Concise introduction with a clear career narrative and relevant highlights."
+    "9": "Compelling, memorable introduction that connects experience to the target role with authentic personality."
+  Elevator pitch:
+    "3": "Cannot summarize their value proposition concisely."
+    "5": "Gives a generic summary without differentiation."
+    "7": "Clear and concise pitch highlighting unique strengths and relevant experience."
+    "9": "Memorable pitch that tells a story, demonstrates unique value, and naturally invites follow-up questions."
+  Motivation and interest:
+    "3": "Generic or unconvincing reasons for interest."
+    "5": "Shows some awareness of the role but reasons feel rehearsed."
+    "7": "Demonstrates genuine enthusiasm with specific reasons tied to personal goals or values."
+    "9": "Authentic passion backed by research, personal connection to the mission, and clear alignment with career trajectory."
 phases:
   - name: opening
     display_name: Opening

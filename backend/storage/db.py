@@ -3,9 +3,12 @@
 All functions are synchronous — call via asyncio.to_thread() from async context.
 """
 
+import json
+
+from sqlalchemy import text
 from sqlmodel import Session as DBSession, SQLModel, create_engine, select
 
-from .models import Score, Session, TranscriptEntry
+from .models import PhaseScore, Score, Session, TranscriptEntry
 
 DATABASE_URL = "sqlite:///sessions.db"
 
@@ -18,6 +21,30 @@ engine = create_engine(
 
 def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
+    _run_migrations()
+
+
+def _run_migrations() -> None:
+    """Apply additive schema migrations for existing databases."""
+    with engine.connect() as conn:
+        # Add 'phase' column to transcriptentry if missing
+        result = conn.execute(text("PRAGMA table_info(transcriptentry)"))
+        columns = [row[1] for row in result]
+        if "phase" not in columns:
+            conn.execute(
+                text("ALTER TABLE transcriptentry ADD COLUMN phase TEXT")
+            )
+            conn.commit()
+
+        # Add new columns to score table if missing
+        result = conn.execute(text("PRAGMA table_info(score)"))
+        columns = [row[1] for row in result]
+        for col in ["technical_accuracy_notes", "dimension_names"]:
+            if col not in columns:
+                conn.execute(
+                    text(f"ALTER TABLE score ADD COLUMN {col} TEXT DEFAULT ''")
+                )
+                conn.commit()
 
 
 def create_session(scenario_name: str) -> Session:
@@ -35,6 +62,7 @@ def add_transcript_entry(
     speaker: str,
     text: str,
     timestamp: float,
+    phase: str | None = None,
 ) -> TranscriptEntry:
     with DBSession(engine) as db:
         entry = TranscriptEntry(
@@ -43,6 +71,7 @@ def add_transcript_entry(
             speaker=speaker,
             text=text,
             timestamp=timestamp,
+            phase=phase,
         )
         db.add(entry)
         db.commit()
@@ -75,6 +104,8 @@ def save_score(
     best_moment: str,
     biggest_opportunity: str,
     filler_word_count: int,
+    technical_accuracy_notes: str = "",
+    dimension_names: str = "",
 ) -> Score:
     with DBSession(engine) as db:
         score = Score(
@@ -86,6 +117,8 @@ def save_score(
             best_moment=best_moment,
             biggest_opportunity=biggest_opportunity,
             filler_word_count=filler_word_count,
+            technical_accuracy_notes=technical_accuracy_notes,
+            dimension_names=dimension_names,
         )
         db.add(score)
         db.commit()
@@ -100,7 +133,7 @@ def get_score_by_session_id(session_id: int) -> dict | None:
         ).first()
         if not score:
             return None
-        return {
+        result = {
             "overall_score": score.overall_score,
             "clarity_score": score.clarity_score,
             "structure_score": score.structure_score,
@@ -108,7 +141,54 @@ def get_score_by_session_id(session_id: int) -> dict | None:
             "best_moment": score.best_moment,
             "biggest_opportunity": score.biggest_opportunity,
             "filler_word_count": score.filler_word_count,
+            "technical_accuracy_notes": score.technical_accuracy_notes or "",
         }
+        if score.dimension_names:
+            result["dimension_names"] = json.loads(score.dimension_names)
+        return result
+
+
+def save_phase_scores(
+    session_id: int, phase_scores: list[dict]
+) -> list[PhaseScore]:
+    with DBSession(engine) as db:
+        rows = []
+        for ps in phase_scores:
+            row = PhaseScore(
+                session_id=session_id,
+                phase_name=ps["phase_name"],
+                phase_display_name=ps["phase_display_name"],
+                phase_order=ps["phase_order"],
+                dimension_scores=json.dumps(ps["dimension_scores"]),
+                phase_summary=ps.get("phase_summary", ""),
+                stronger_answer=ps.get("stronger_answer", ""),
+            )
+            db.add(row)
+            rows.append(row)
+        db.commit()
+        for r in rows:
+            db.refresh(r)
+        return rows
+
+
+def get_phase_scores_by_session_id(session_id: int) -> list[dict]:
+    with DBSession(engine) as db:
+        rows = db.exec(
+            select(PhaseScore)
+            .where(PhaseScore.session_id == session_id)
+            .order_by(PhaseScore.phase_order)
+        ).all()
+        return [
+            {
+                "phase_name": r.phase_name,
+                "phase_display_name": r.phase_display_name,
+                "phase_order": r.phase_order,
+                "dimension_scores": json.loads(r.dimension_scores),
+                "phase_summary": r.phase_summary,
+                "stronger_answer": r.stronger_answer,
+            }
+            for r in rows
+        ]
 
 
 def get_session_with_transcripts(session_id: int) -> dict | None:
@@ -132,6 +212,7 @@ def get_session_with_transcripts(session_id: int) -> dict | None:
                     "speaker": e.speaker,
                     "text": e.text,
                     "timestamp": e.timestamp,
+                    "phase": e.phase,
                 }
                 for e in entries
             ],
