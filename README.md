@@ -14,8 +14,11 @@ Built for Apple Silicon (tested on Mac Studio M3 Ultra with 256GB unified memory
 - **Dynamic radar chart** — adapts dimensions to scenario focus areas (e.g., requirements gathering, trade-off analysis for system design)
 - **Phase-by-phase breakdown** — expandable timeline showing dimension scores, evidence, and improvement advice for each interview phase
 - **RAG-grounded evaluation** — cross-references candidate claims against local knowledge base for technical accuracy
+- **Real-time whiteboard** — tldraw v4 drawing canvas for sketching system design diagrams during technical interviews (per-scenario opt-in)
+- **Diagram-aware evaluation** — serialized whiteboard snapshots injected into feedback prompts so the LLM scores architecture diagrams alongside verbal responses
+- **Diagram replay in review** — read-only tldraw viewer per phase in the post-session review, showing what the candidate drew
 - **Filler word tracking** — automatic detection of "um", "uh", "like", "you know", "basically"
-- **Session persistence** — transcripts (with phase annotations), scores, and per-phase evaluations saved to SQLite
+- **Session persistence** — transcripts (with phase annotations), scores, per-phase evaluations, and diagram snapshots saved to SQLite
 
 ## Architecture
 
@@ -145,7 +148,9 @@ npm install
 2. **Click "Start Recording"** — grant microphone access when prompted
 3. **Speak naturally** — the coach will respond with voice and text
 4. **Click "End & Review"** when done — the AI analyzes your performance
-5. **Review your scores** — dynamic radar chart (adapts to scenario focus areas), per-phase breakdown with rubric-grounded dimension scores, evidence quotes, stronger-answer suggestions, filler word count, and full phase-grouped transcript replay
+5. **Review your scores** — dynamic radar chart (adapts to scenario focus areas), per-phase breakdown with rubric-grounded dimension scores, evidence quotes, stronger-answer suggestions, read-only diagram replay per phase, filler word count, and full phase-grouped transcript replay
+
+For system design scenarios, a tldraw whiteboard panel appears alongside the transcript. Use the toggle button in the header to show/hide it mid-session. Diagrams are automatically captured at each phase transition and included in the LLM's evaluation.
 
 ## Project Structure
 
@@ -161,7 +166,9 @@ npm install
 │   │   ├── manager.py             # Legacy message history + sentence chunking
 │   │   ├── phases.py              # Phase-aware InterviewConductor (state machine)
 │   │   ├── router.py              # LLM-based phase transition router
-│   │   └── feedback.py            # Pydantic AI rubric evaluation + legacy scoring
+│   │   └── feedback.py            # Pydantic AI rubric evaluation + diagram context
+│   ├── diagram/
+│   │   └── serializer.py          # tldraw snapshot → text serializer (spatial grid)
 │   ├── knowledge/
 │   │   ├── embedder.py            # Ollama embedding wrapper
 │   │   ├── store.py               # Qdrant vector store (local disk mode)
@@ -171,22 +178,27 @@ npm install
 │   │   ├── loader.py              # YAML scenario parser (with rubrics)
 │   │   └── templates/             # Interview scenario configs + rubric anchors
 │   └── storage/
-│       ├── models.py              # SQLModel tables (Session, Transcript, Score, PhaseScore)
+│       ├── models.py              # SQLModel tables (Session, Transcript, Score,
+│       │                          #   PhaseScore, DiagramSnapshot, SkillDimension)
 │       └── db.py                  # SQLite CRUD + additive migrations
 ├── frontend/
 │   ├── public/audio-processor.js  # AudioWorklet (plain JS, not bundled)
 │   └── src/
 │       ├── App.tsx                # Three-way view router
-│       ├── stores/sessionStore.ts # Zustand state management
 │       ├── hooks/
 │       │   ├── useAudio.ts        # Mic capture at 16kHz
 │       │   ├── useWebSocket.ts    # WS lifecycle + message dispatch
 │       │   └── usePlayback.ts     # TTS audio queue at 24kHz
+│       ├── stores/
+│       │   ├── sessionStore.ts    # Zustand state management
+│       │   └── profileStore.ts    # Skill profile + recommendations
 │       └── components/
-│           ├── SessionSetup/      # Scenario selection
-│           ├── LiveSession/       # Active interview UI
+│           ├── SessionSetup/      # Scenario selection + skill overview
+│           ├── LiveSession/       # Active interview UI + whiteboard panel
+│           │   └── WhiteboardPanel.tsx  # tldraw canvas (lazy loaded)
 │           └── Review/            # Post-session dashboard (dynamic radar,
-│                                  #   phase timeline, transcript replay)
+│               ├── DiagramViewer.tsx    #   read-only tldraw replay (lazy loaded)
+│               └── ...            #   phase timeline, transcript replay)
 └── CLAUDE.md                      # Claude Code instructions
 ```
 
@@ -194,7 +206,7 @@ npm install
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React 19, TypeScript, Zustand, Tailwind CSS v4, Recharts |
+| Frontend | React 19, TypeScript, Zustand, Tailwind CSS v4, Recharts, tldraw v4 |
 | Backend | FastAPI, Python 3.14, SQLModel, SQLite, Pydantic AI |
 | STT | mlx-whisper (whisper-large-v3-turbo, Apple Silicon) |
 | LLM | LM Studio (OpenAI-compatible API, local inference) |

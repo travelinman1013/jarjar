@@ -181,6 +181,21 @@ Cross-session skill tracking with FSRS spaced repetition scheduling.
 - Profile updates are idempotent: re-analyzing a session updates scores but does not re-advance FSRS intervals
 - Single implicit global profile (single-tenant local-first app, no user accounts)
 
+### 3c. Real-Time Collaborative Whiteboard
+
+Optional tldraw v4 drawing canvas for system design scenarios.
+
+**How it works:**
+- Scenarios with `whiteboard_enabled: true` show a split-panel layout: transcript on the left, tldraw canvas on the right
+- Toggle button in header to show/hide whiteboard mid-session
+- Canvas state debounced (2s) and sent to backend via `diagram_state` WebSocket messages
+- Diagrams serialized to text (spatial 3x3 grid layout, component summarization) for LLM context injection
+- Snapshots captured automatically on phase transitions and session stop, stored in `DiagramSnapshot` table
+- Review screen shows read-only tldraw viewers per phase (lazy loaded, pan/zoom only, no editing tools)
+- Feedback evaluation includes diagram text when scoring architecture/design dimensions
+- tldraw bundle (~2MB) code-split via `React.lazy()` — separate chunks for live canvas and review viewer
+- Dark theme CSS override to match app's `bg-gray-950` palette
+
 ### 4. Polished UI
 
 Three main screens:
@@ -198,6 +213,7 @@ Three main screens:
 - Minimal, distraction-free design
 - Visual audio waveform showing who's speaking
 - Live transcript appearing in real-time (subtle, not dominant)
+- Optional tldraw whiteboard panel for system design scenarios (toggle in header)
 - Timer showing session duration
 - Pause/end session controls
 - Visual indicator for bot "thinking" state
@@ -206,6 +222,7 @@ Three main screens:
 - Full transcript with timestamps and speaker labels
 - Feedback scores displayed as a radar chart
 - Highlighted key moments (clickable to jump in transcript)
+- Read-only diagram replay per phase (for whiteboard scenarios)
 - Filler word analysis
 - Session history with trend charts
 - Export to Markdown button
@@ -313,7 +330,9 @@ voice-interview-coach/
 │   │   ├── phases.py           # Phase-aware InterviewConductor (state machine)
 │   │   ├── router.py           # LLM-based phase transition router
 │   │   ├── llm.py              # LM Studio OpenAI client
-│   │   └── feedback.py         # Pydantic AI rubric evaluation + legacy scoring
+│   │   └── feedback.py         # Pydantic AI rubric evaluation + diagram context
+│   ├── diagram/
+│   │   └── serializer.py       # tldraw snapshot → text serializer (spatial grid)
 │   ├── scenarios/
 │   │   ├── loader.py           # YAML scenario parser
 │   │   └── templates/          # Built-in scenario YAML files
