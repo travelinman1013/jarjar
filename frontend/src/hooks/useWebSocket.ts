@@ -72,6 +72,9 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             store.setBotSpeaking(false)
             optionsRef.current?.onInterrupt?.()
             break
+          case 'phase_change':
+            store.setPhase(data.phase, data.display_name)
+            break
           case 'error':
             console.error('Server error:', data.message)
             break

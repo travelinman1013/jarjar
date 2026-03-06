@@ -17,3 +17,37 @@ evaluation_criteria:
   - Clear and concise self-introduction
   - Authentic enthusiasm
   - Relevant highlights mentioned
+phases:
+  - name: opening
+    display_name: Opening
+    objective: Greet the candidate and ask them to introduce themselves.
+    prompt_injection: >
+      You are in the opening phase. Give a warm, friendly greeting and ask
+      the candidate to tell you about themselves. Keep it light and
+      encouraging.
+    max_turns: 2
+    min_turns: 1
+    transition_hint: The candidate has introduced themselves.
+    next_phases: [warmup_questions]
+  - name: warmup_questions
+    display_name: Warm-Up Questions
+    objective: Ask simple icebreaker questions to build confidence.
+    prompt_injection: >
+      Ask light icebreaker questions like why they are interested in this
+      role, what excites them about the field, or what they are most proud
+      of in their career. Give brief encouraging feedback after each answer.
+      Keep the energy positive and supportive.
+    max_turns: 4
+    min_turns: 2
+    transition_hint: The candidate has answered two or three warm-up questions.
+    next_phases: [wrap_up]
+  - name: wrap_up
+    display_name: Wrap Up
+    objective: End the warm-up with encouragement.
+    prompt_injection: >
+      Wrap up the warm-up session. Tell the candidate they did a great job
+      warming up and give one brief tip for their upcoming interviews.
+    max_turns: 2
+    min_turns: 1
+    transition_hint: Always terminal.
+    next_phases: []

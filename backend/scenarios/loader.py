@@ -12,6 +12,17 @@ from pydantic import BaseModel
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
+class PhaseConfig(BaseModel):
+    name: str
+    display_name: str
+    objective: str
+    prompt_injection: str
+    max_turns: int = 6
+    min_turns: int = 1
+    transition_hint: str = ""
+    next_phases: list[str] = []
+
+
 class ScenarioConfig(BaseModel):
     name: str
     type: str
@@ -20,6 +31,7 @@ class ScenarioConfig(BaseModel):
     system_prompt: str
     focus_areas: list[str]
     evaluation_criteria: list[str]
+    phases: list[PhaseConfig] = []
 
 
 def load_scenarios() -> list[ScenarioConfig]:

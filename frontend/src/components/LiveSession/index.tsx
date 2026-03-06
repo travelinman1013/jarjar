@@ -25,6 +25,18 @@ function VadIndicator() {
   )
 }
 
+function PhaseIndicator() {
+  const phaseDisplayName = useSessionStore((s) => s.phaseDisplayName)
+
+  if (!phaseDisplayName) return null
+
+  return (
+    <span className="text-xs font-medium text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded">
+      {phaseDisplayName}
+    </span>
+  )
+}
+
 function BotSpeakingIndicator() {
   const isBotSpeaking = useSessionStore((s) => s.isBotSpeaking)
   const isRecording = useSessionStore((s) => s.isRecording)
@@ -177,11 +189,14 @@ export function LiveSession() {
           <h1 className="text-xl font-semibold text-gray-100">
             Voice Interview Coach
           </h1>
-          {scenarioName && (
-            <span className="text-sm text-gray-400">
-              {scenarioName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {scenarioName && (
+              <span className="text-sm text-gray-400">
+                {scenarioName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+              </span>
+            )}
+            <PhaseIndicator />
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <BotSpeakingIndicator />

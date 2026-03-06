@@ -31,6 +31,8 @@ interface SessionState {
   transcripts: TranscriptEntry[]
   botMessageCounter: number
   feedback: FeedbackData | null
+  currentPhase: string | null
+  phaseDisplayName: string | null
 
   setSession: (id: number, scenario: string) => void
   clearSession: () => void
@@ -42,6 +44,7 @@ interface SessionState {
   setAnalyzing: (v: boolean) => void
   setFeedback: (f: FeedbackData) => void
   setView: (v: 'setup' | 'session' | 'review') => void
+  setPhase: (phase: string, displayName: string) => void
   addTranscript: (entry: TranscriptEntry) => void
   addBotSentence: (text: string, timestamp: number) => void
   reset: () => void
@@ -60,6 +63,8 @@ export const useSessionStore = create<SessionState>()((set) => ({
   transcripts: [],
   botMessageCounter: 0,
   feedback: null,
+  currentPhase: null,
+  phaseDisplayName: null,
 
   setSession: (id, scenario) =>
     set({
@@ -74,6 +79,8 @@ export const useSessionStore = create<SessionState>()((set) => ({
       transcripts: [],
       botMessageCounter: 0,
       feedback: null,
+      currentPhase: null,
+      phaseDisplayName: null,
     }),
   clearSession: () =>
     set({
@@ -88,6 +95,8 @@ export const useSessionStore = create<SessionState>()((set) => ({
       transcripts: [],
       botMessageCounter: 0,
       feedback: null,
+      currentPhase: null,
+      phaseDisplayName: null,
     }),
   setRecording: (v) => set({ isRecording: v }),
   setConnected: (v) => set({ isConnected: v }),
@@ -97,6 +106,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
   setAnalyzing: (v) => set({ isAnalyzing: v }),
   setFeedback: (f) => set({ feedback: f }),
   setView: (v) => set({ view: v }),
+  setPhase: (phase, displayName) => set({ currentPhase: phase, phaseDisplayName: displayName }),
   addTranscript: (entry) =>
     set((state) => {
       // Replace existing entry with same turnId, or append
@@ -156,5 +166,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
       transcripts: [],
       botMessageCounter: 0,
       feedback: null,
+      currentPhase: null,
+      phaseDisplayName: null,
     }),
 }))

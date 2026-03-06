@@ -18,7 +18,9 @@ from audio.stt import SpeechToText
 from audio.tts import TextToSpeech
 from conversation.feedback import count_filler_words, generate_feedback
 from conversation.llm import stream_chat_completion
-from conversation.manager import ConversationManager, chunk_sentences
+from conversation.manager import chunk_sentences
+from conversation.phases import InterviewConductor
+from conversation.router import evaluate_phase_transition
 from scenarios.loader import load_scenarios, get_scenario_by_name
 from storage.db import (
     create_db_and_tables,
@@ -147,7 +149,7 @@ async def create_session(req: CreateSessionRequest):
 
 async def run_bot_response(
     websocket: WebSocket,
-    conversation: ConversationManager,
+    conversation: InterviewConductor,
     session_id: int | None = None,
     bot_turn_id: int = 0,
 ):
@@ -209,6 +211,27 @@ async def cancel_bot_task(task: asyncio.Task | None) -> None:
             pass
 
 
+async def run_bot_response_with_routing(
+    websocket: WebSocket,
+    conductor: InterviewConductor,
+    session_id: int | None = None,
+    bot_turn_id: int = 0,
+):
+    """Wraps run_bot_response with post-response phase evaluation."""
+    await run_bot_response(websocket, conductor, session_id, bot_turn_id)
+
+    if conductor.should_evaluate_transition():
+        decision = await evaluate_phase_transition(conductor)
+        if decision.should_advance and decision.next_phase:
+            conductor.advance_phase(decision.next_phase)
+            phase_cfg = conductor.phases.get(decision.next_phase)
+            await websocket.send_json({
+                "type": "phase_change",
+                "phase": decision.next_phase,
+                "display_name": phase_cfg.display_name if phase_cfg else decision.next_phase,
+            })
+
+
 # ── WebSocket handler ───────────────────────────────────────────────────────
 
 
@@ -216,7 +239,7 @@ async def cancel_bot_task(task: asyncio.Task | None) -> None:
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     vad = VoiceActivityDetector()
-    conversation = ConversationManager()
+    conductor = InterviewConductor()
     turn_id = 0
     bot_response_task: asyncio.Task | None = None
     session_id: int | None = None
@@ -262,12 +285,12 @@ async def websocket_endpoint(websocket: WebSocket):
                                     session_id, tid, "user", text, time.time(),
                                 )
 
-                            # Feed to conversation and spawn bot response
-                            conversation.add_user_message(text)
+                            # Feed to conductor and spawn bot response
+                            conductor.add_user_message(text)
                             await cancel_bot_task(bot_response_task)
                             bot_response_task = asyncio.create_task(
-                                run_bot_response(
-                                    websocket, conversation, session_id, tid,
+                                run_bot_response_with_routing(
+                                    websocket, conductor, session_id, tid,
                                 )
                             )
 
@@ -291,20 +314,21 @@ async def websocket_endpoint(websocket: WebSocket):
                                     get_scenario_by_name, scenario_name,
                                 )
                                 if scenario:
-                                    conversation = ConversationManager(
-                                        system_prompt=scenario.system_prompt,
+                                    conductor = InterviewConductor(
+                                        base_system_prompt=scenario.system_prompt,
+                                        phases=scenario.phases or None,
                                     )
                                 else:
-                                    conversation = ConversationManager()
+                                    conductor = InterviewConductor()
                             else:
-                                conversation = ConversationManager()
+                                conductor = InterviewConductor()
                         else:
-                            conversation = ConversationManager()
+                            conductor = InterviewConductor()
                     except Exception:
                         logger.exception(
                             "Failed to load scenario for session %s", session_id,
                         )
-                        conversation = ConversationManager()
+                        conductor = InterviewConductor()
 
                     session_start_time = time.time()
                     logger.info(f"Session started (id={session_id})")

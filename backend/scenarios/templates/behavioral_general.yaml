@@ -20,3 +20,74 @@ evaluation_criteria:
   - Provides specific examples
   - Demonstrates self-awareness
   - Concise and structured responses
+phases:
+  - name: opening
+    display_name: Opening
+    objective: Warm greeting and set expectations for the behavioral interview.
+    prompt_injection: >
+      You are in the opening phase. Greet the candidate warmly and explain
+      that you will be asking behavioral questions using the STAR method.
+      Ask them to share a brief overview of their recent experience to
+      get started.
+    max_turns: 2
+    min_turns: 1
+    transition_hint: The candidate has introduced themselves and is ready for questions.
+    next_phases: [star_situation]
+  - name: star_situation
+    display_name: Situation and Task
+    objective: Get the candidate to clearly describe a specific situation and their role.
+    prompt_injection: >
+      Ask a behavioral question about leadership or teamwork. Focus on
+      getting the candidate to describe a specific situation and their task
+      or responsibility in it. If they are vague, ask follow-up questions
+      to get concrete details about context and stakes.
+    max_turns: 5
+    min_turns: 2
+    transition_hint: The candidate has described a clear situation with specific context.
+    next_phases: [star_action]
+  - name: star_action
+    display_name: Action
+    objective: Understand exactly what actions the candidate took and why.
+    prompt_injection: >
+      Probe deeper into the actions the candidate took. Ask what specifically
+      they did, what alternatives they considered, and why they chose their
+      approach. Look for individual contribution versus team effort. If the
+      candidate uses "we" too much, ask what they personally did.
+    max_turns: 5
+    min_turns: 2
+    transition_hint: The candidate has described their specific actions with clear reasoning.
+    next_phases: [star_result]
+  - name: star_result
+    display_name: Result
+    objective: Get measurable outcomes and reflections on the experience.
+    prompt_injection: >
+      Ask about the results and outcomes. Push for specific metrics or
+      measurable impact. Ask what they learned and what they would do
+      differently. Give brief feedback on their answer structure.
+    max_turns: 4
+    min_turns: 2
+    transition_hint: The candidate has shared outcomes and reflections.
+    next_phases: [follow_up]
+  - name: follow_up
+    display_name: Follow-Up Questions
+    objective: Ask a second behavioral question on a different topic area.
+    prompt_injection: >
+      Ask a new behavioral question on a different topic, such as conflict
+      resolution or problem-solving under pressure. This time, see if the
+      candidate naturally uses the STAR framework without being prompted.
+      Give feedback on improvement compared to the first answer.
+    max_turns: 6
+    min_turns: 2
+    transition_hint: The candidate has completed the second behavioral answer.
+    next_phases: [wrap_up]
+  - name: wrap_up
+    display_name: Wrap Up
+    objective: Summarize feedback and close with encouragement.
+    prompt_injection: >
+      Wrap up the interview. Give a brief summary of what went well and
+      one area to improve. Ask if the candidate has any questions. End
+      on an encouraging note.
+    max_turns: 2
+    min_turns: 1
+    transition_hint: Always terminal.
+    next_phases: []

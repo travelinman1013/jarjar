@@ -22,3 +22,72 @@ evaluation_criteria:
   - Articulates consistency vs availability trade-offs
   - Proposes concrete partitioning strategy
   - Considers real-world failure scenarios
+phases:
+  - name: opening
+    display_name: Opening
+    objective: Present the distributed cache design problem and set context.
+    prompt_injection: >
+      You are in the opening phase. Ask the candidate to design a distributed
+      cache system like Redis or Memcached from scratch. Briefly describe the
+      expected scale and use case. Do not dive into details yet.
+    max_turns: 2
+    min_turns: 1
+    transition_hint: The candidate understands the problem and is ready to start.
+    next_phases: [eviction_design]
+  - name: eviction_design
+    display_name: Eviction Strategies
+    objective: Explore cache eviction policies and their trade-offs.
+    prompt_injection: >
+      Focus on cache eviction strategies. Ask about LRU, LFU, and TTL-based
+      approaches. Probe on implementation details like data structures for
+      efficient eviction. Challenge the candidate on trade-offs between
+      memory usage and hit rates.
+    max_turns: 6
+    min_turns: 2
+    transition_hint: The candidate has discussed at least two eviction strategies with trade-offs.
+    next_phases: [partitioning]
+  - name: partitioning
+    display_name: Data Partitioning
+    objective: Discuss data partitioning, consistent hashing, and rebalancing.
+    prompt_injection: >
+      Move to data partitioning. Ask how the candidate would distribute data
+      across multiple cache nodes. Probe on consistent hashing, virtual nodes,
+      and what happens when nodes are added or removed. Ask about hot key
+      handling.
+    max_turns: 6
+    min_turns: 2
+    transition_hint: The candidate has proposed a partitioning strategy and addressed rebalancing.
+    next_phases: [consistency]
+  - name: consistency
+    display_name: Replication and Consistency
+    objective: Explore replication strategies and consistency models.
+    prompt_injection: >
+      Discuss replication and consistency. Ask about read replicas, write
+      propagation, and what consistency model they would choose. Push on
+      the tension between availability and consistency using the CAP theorem.
+    max_turns: 6
+    min_turns: 2
+    transition_hint: The candidate has articulated their consistency model and trade-offs.
+    next_phases: [failure_scenarios]
+  - name: failure_scenarios
+    display_name: Failure Recovery
+    objective: Test thinking about real-world failure modes and recovery.
+    prompt_injection: >
+      Present failure scenarios. What happens when a cache node crashes? How
+      do you detect it? What about network partitions? How do you handle
+      thundering herd on cache miss after a node failure? Push on concrete
+      recovery mechanisms.
+    max_turns: 5
+    min_turns: 2
+    transition_hint: The candidate has addressed at least two failure scenarios.
+    next_phases: [wrap_up]
+  - name: wrap_up
+    display_name: Wrap Up
+    objective: Summarize the discussion and close warmly.
+    prompt_injection: >
+      Wrap up the interview. Summarize the key design decisions the candidate
+      made. Ask if they have any questions. Give brief encouragement.
+    max_turns: 2
+    min_turns: 1
+    transition_hint: Always terminal.
+    next_phases: []

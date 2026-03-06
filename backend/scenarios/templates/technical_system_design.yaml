@@ -20,3 +20,71 @@ evaluation_criteria:
   - Considers scalability and reliability
   - Articulates trade-offs clearly
   - Communicates design decisions effectively
+phases:
+  - name: opening
+    display_name: Opening
+    objective: Present the system design problem clearly and set expectations.
+    prompt_injection: >
+      You are in the opening phase. Present a system design problem to the
+      candidate in two to three sentences. Ask them how they would like to
+      approach it. Do not start designing yet.
+    max_turns: 2
+    min_turns: 1
+    transition_hint: The candidate has acknowledged the problem and is ready to begin.
+    next_phases: [requirements]
+  - name: requirements
+    display_name: Requirements Gathering
+    objective: Guide the candidate to clarify functional and non-functional requirements.
+    prompt_injection: >
+      You are in the requirements gathering phase. The candidate should be asking
+      clarifying questions about scale, users, latency, and feature priorities.
+      Answer their questions honestly. If they jump straight to design without
+      asking questions, gently redirect them to gather requirements first.
+    max_turns: 6
+    min_turns: 2
+    transition_hint: The candidate has identified at least three key requirements or constraints.
+    next_phases: [high_level_design]
+  - name: high_level_design
+    display_name: High-Level Design
+    objective: Have the candidate propose an overall architecture with major components.
+    prompt_injection: >
+      You are in the high-level design phase. Ask the candidate to walk through
+      the main components of their system and how data flows between them.
+      Probe on choices of databases, caches, queues, and APIs.
+    max_turns: 6
+    min_turns: 2
+    transition_hint: The candidate has described major components and their interactions.
+    next_phases: [deep_dive]
+  - name: deep_dive
+    display_name: Deep Dive
+    objective: Drill into one component with specifics on data structures, algorithms, and edge cases.
+    prompt_injection: >
+      Pick one component from the candidate's design and go deep. Ask about
+      specific data structures, algorithms, failure modes, and scaling limits.
+      Challenge their assumptions with follow-up questions.
+    max_turns: 8
+    min_turns: 3
+    transition_hint: The component has been explored in sufficient depth or the candidate is struggling.
+    next_phases: [curveball, wrap_up]
+  - name: curveball
+    display_name: Failure Scenarios
+    objective: Present a realistic failure scenario to test resilience thinking.
+    prompt_injection: >
+      Present a failure scenario related to the design. For example, a node
+      crashes, traffic spikes tenfold, or a region goes down. See how the
+      candidate adapts their design to handle it.
+    max_turns: 4
+    min_turns: 1
+    transition_hint: The candidate has addressed the failure scenario.
+    next_phases: [wrap_up]
+  - name: wrap_up
+    display_name: Wrap Up
+    objective: Summarize what was covered and close the interview warmly.
+    prompt_injection: >
+      Wrap up the interview. Briefly summarize the main topics you covered.
+      Ask the candidate if they have any questions. Give one sentence of
+      encouragement about their performance.
+    max_turns: 2
+    min_turns: 1
+    transition_hint: Always terminal.
+    next_phases: []
