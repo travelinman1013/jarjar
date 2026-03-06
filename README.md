@@ -10,9 +10,12 @@ Built for Apple Silicon (tested on Mac Studio M3 Ultra with 256GB unified memory
 - **Multiple interview scenarios** — behavioral, technical system design, and warm-up sessions with configurable difficulty
 - **Live transcription** — see both your speech and the coach's responses in real-time
 - **Barge-in support** — interrupt the coach mid-sentence, just like a real conversation
-- **Post-session feedback** — AI-generated scores for clarity, structure, and depth with a radar chart visualization
+- **Multi-dimensional rubric evaluation** — per-phase scoring with rubric anchors (3/5/7/9 levels), transcript evidence quotes, and stronger-answer suggestions powered by Pydantic AI structured output
+- **Dynamic radar chart** — adapts dimensions to scenario focus areas (e.g., requirements gathering, trade-off analysis for system design)
+- **Phase-by-phase breakdown** — expandable timeline showing dimension scores, evidence, and improvement advice for each interview phase
+- **RAG-grounded evaluation** — cross-references candidate claims against local knowledge base for technical accuracy
 - **Filler word tracking** — automatic detection of "um", "uh", "like", "you know", "basically"
-- **Session persistence** — transcripts and scores saved to SQLite for review
+- **Session persistence** — transcripts (with phase annotations), scores, and per-phase evaluations saved to SQLite
 
 ## Architecture
 
@@ -72,7 +75,7 @@ Built for Apple Silicon (tested on Mac Studio M3 Ultra with 256GB unified memory
 6. **Speech synthesis**: Each sentence synthesized by Kokoro TTS (ONNX), sent as 24kHz PCM binary frames
 7. **Playback**: Browser queues and plays TTS audio with gapless scheduling
 8. **Barge-in**: If user speaks while bot is talking, bot response is cancelled and playback flushed
-9. **Post-session**: Full transcript sent to LLM for structured JSON feedback (clarity, structure, depth scores)
+9. **Post-session**: Transcripts segmented by interview phase, each phase evaluated by Pydantic AI agent against rubric anchors with per-dimension scores, evidence quotes, and improvement suggestions. Summary agent synthesizes overall scores
 
 ## Prerequisites
 
@@ -142,7 +145,7 @@ npm install
 2. **Click "Start Recording"** — grant microphone access when prompted
 3. **Speak naturally** — the coach will respond with voice and text
 4. **Click "End & Review"** when done — the AI analyzes your performance
-5. **Review your scores** — radar chart, filler word count, best moment, and improvement suggestions
+5. **Review your scores** — dynamic radar chart (adapts to scenario focus areas), per-phase breakdown with rubric-grounded dimension scores, evidence quotes, stronger-answer suggestions, filler word count, and full phase-grouped transcript replay
 
 ## Project Structure
 
@@ -155,14 +158,21 @@ npm install
 │   │   └── tts.py                 # Kokoro TTS (speech synthesis)
 │   ├── conversation/
 │   │   ├── llm.py                 # LM Studio OpenAI client
-│   │   ├── manager.py             # Message history + sentence chunking
-│   │   └── feedback.py            # Post-session scoring + filler words
+│   │   ├── manager.py             # Legacy message history + sentence chunking
+│   │   ├── phases.py              # Phase-aware InterviewConductor (state machine)
+│   │   ├── router.py              # LLM-based phase transition router
+│   │   └── feedback.py            # Pydantic AI rubric evaluation + legacy scoring
+│   ├── knowledge/
+│   │   ├── embedder.py            # Ollama embedding wrapper
+│   │   ├── store.py               # Qdrant vector store (local disk mode)
+│   │   ├── retriever.py           # RAG orchestrator
+│   │   └── ingest.py              # CLI for knowledge base ingestion
 │   ├── scenarios/
-│   │   ├── loader.py              # YAML scenario parser
-│   │   └── templates/             # Interview scenario configs
+│   │   ├── loader.py              # YAML scenario parser (with rubrics)
+│   │   └── templates/             # Interview scenario configs + rubric anchors
 │   └── storage/
-│       ├── models.py              # SQLModel tables (Session, Transcript, Score)
-│       └── db.py                  # SQLite CRUD helpers
+│       ├── models.py              # SQLModel tables (Session, Transcript, Score, PhaseScore)
+│       └── db.py                  # SQLite CRUD + additive migrations
 ├── frontend/
 │   ├── public/audio-processor.js  # AudioWorklet (plain JS, not bundled)
 │   └── src/
@@ -175,7 +185,8 @@ npm install
 │       └── components/
 │           ├── SessionSetup/      # Scenario selection
 │           ├── LiveSession/       # Active interview UI
-│           └── Review/            # Post-session dashboard + radar chart
+│           └── Review/            # Post-session dashboard (dynamic radar,
+│                                  #   phase timeline, transcript replay)
 └── CLAUDE.md                      # Claude Code instructions
 ```
 
@@ -184,7 +195,7 @@ npm install
 | Layer | Technology |
 |-------|-----------|
 | Frontend | React 19, TypeScript, Zustand, Tailwind CSS v4, Recharts |
-| Backend | FastAPI, Python 3.14, SQLModel, SQLite |
+| Backend | FastAPI, Python 3.14, SQLModel, SQLite, Pydantic AI |
 | STT | mlx-whisper (whisper-large-v3-turbo, Apple Silicon) |
 | LLM | LM Studio (OpenAI-compatible API, local inference) |
 | TTS | Kokoro ONNX (24kHz, af_heart voice) |

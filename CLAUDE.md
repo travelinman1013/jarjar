@@ -66,36 +66,36 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 - `GET /` — Health check
 - `GET /api/scenarios` — List available interview scenarios
 - `POST /api/sessions` — Create a new session (body: `{ scenario_name }`)
-- `GET /api/sessions/{id}` — Get session details, transcripts, and score
-- `POST /api/sessions/{id}/analyze` — Run post-session LLM feedback analysis (idempotent)
+- `GET /api/sessions/{id}` — Get session details, transcripts, score, and phase_scores
+- `POST /api/sessions/{id}/analyze` — Run post-session LLM feedback analysis (idempotent). Returns per-phase rubric scores when scenario has rubrics, otherwise legacy 3-dimension scores
 
 ### Backend (`backend/`)
 - **`main.py`** — FastAPI entrypoint. Loads `.env` via python-dotenv before imports. Global `SpeechToText`, `TextToSpeech`, and `KnowledgeRetriever` instances loaded at startup; per-connection `VoiceActivityDetector` and `InterviewConductor`. Heavy ops run via `asyncio.to_thread()`.
 - **`audio/vad.py`** — Silero VAD wrapper. 512-sample windows (32ms), threshold 0.7. Silence threshold configurable via `VAD_SILENCE_MS` env var (default 800ms).
 - **`audio/stt.py`** — mlx-whisper wrapper. Model: `mlx-community/whisper-large-v3-turbo`. Synchronous `transcribe_sync()`, language pinned to English.
 - **`audio/tts.py`** — Kokoro TTS (ONNX). Strips non-speech characters and normalizes whitespace before synthesis. Returns Int16 PCM at 24kHz.
-- **`conversation/llm.py`** — AsyncOpenAI client pointing to LM Studio. Streaming `stream_chat_completion()` for conversation, non-streaming calls for feedback analysis.
+- **`conversation/llm.py`** — AsyncOpenAI client pointing to LM Studio. Streaming `stream_chat_completion()` for conversation. Exports `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` used by feedback agents.
 - **`conversation/manager.py`** — Legacy flat conversation manager (superseded by `phases.py`). `chunk_sentences()` buffers streaming tokens into complete sentences for TTS.
 - **`conversation/phases.py`** — Phase-aware `InterviewConductor` replacing `ConversationManager`. State machine with phase-specific system prompt injection, turn counting, context window management (max 40 messages), and RAG context injection via `set_rag_context()`.
 - **`conversation/router.py`** — Lightweight LLM-based phase transition router. Runs off the hot path after each bot response. Uses `PhaseDecision` Pydantic model with `should_advance`, `next_phase`, `reasoning`. Force-advances at `max_turns`.
-- **`conversation/feedback.py`** — Post-session analysis. `count_filler_words()` uses regex on user transcripts. `generate_feedback()` calls LLM with `response_format=json_object` for structured scoring. Optionally grounds evaluation against RAG-retrieved technical reference material.
+- **`conversation/feedback.py`** — Post-session analysis using Pydantic AI agents for type-safe structured output. `count_filler_words()` uses regex on user transcripts. `generate_rubric_feedback()` runs multi-pass per-phase evaluation with rubric anchoring (3/5/7/9 levels per focus area), transcript evidence quotes, and stronger-answer suggestions. `generate_feedback_legacy()` provides backward-compatible single-call evaluation for scenarios without rubrics. Uses `DimensionScore`, `PhaseEvaluationResult`, `SummaryResult`, and `LegacyFeedbackResult` Pydantic output models with `pydantic_ai.Agent`. Optionally grounds evaluation against RAG-retrieved technical reference material.
 - **`knowledge/embedder.py`** — Async/sync wrapper around Ollama's embedding API (`nomic-embed-text`). Supports single and batch embedding.
 - **`knowledge/store.py`** — Qdrant vector store in local disk mode (no server). Collection-per-topic namespacing, cosine distance. All operations are synchronous (callers use `asyncio.to_thread()`).
 - **`knowledge/retriever.py`** — High-level RAG orchestrator. Embeds query, searches Qdrant, filters by distance threshold (0.8 max), formats chunks for system prompt injection. Returns `None` for irrelevant queries.
 - **`knowledge/ingest.py`** — CLI tool for ingesting markdown/text documents into the vector store. Uses `RecursiveCharacterTextSplitter` for chunking.
-- **`scenarios/loader.py`** — Loads YAML scenario configs from `scenarios/templates/`. Each has `system_prompt`, `focus_areas`, `evaluation_criteria`, `phases`, and `knowledge_collections`.
-- **`storage/models.py`** — SQLModel tables: `Session`, `TranscriptEntry`, `Score`.
-- **`storage/db.py`** — SQLite CRUD helpers (all synchronous, called via `asyncio.to_thread()`).
+- **`scenarios/loader.py`** — Loads YAML scenario configs from `scenarios/templates/`. Each has `system_prompt`, `focus_areas`, `evaluation_criteria`, `phases`, `knowledge_collections`, `rubrics` (per-focus-area scoring anchors at levels 3/5/7/9), and `phase_exemplars` (strong answer hints per phase).
+- **`storage/models.py`** — SQLModel tables: `Session`, `TranscriptEntry` (with `phase` column for per-phase transcript grouping), `Score` (with `technical_accuracy_notes` and `dimension_names` for dynamic radar chart), `PhaseScore` (per-phase rubric evaluation results with JSON `dimension_scores`).
+- **`storage/db.py`** — SQLite CRUD helpers (all synchronous, called via `asyncio.to_thread()`). Includes `_run_migrations()` for additive schema changes on existing databases. `save_phase_scores()` / `get_phase_scores_by_session_id()` for per-phase rubric data.
 
 ### Frontend (`frontend/`)
 - **`public/audio-processor.js`** — AudioWorklet processor. Must be plain JS (not bundled). Converts Float32→Int16, buffers 1600 samples (100ms) before posting.
 - **`src/hooks/useAudio.ts`** — Creates `AudioContext({ sampleRate: 16000 })` for native browser resampling. Connects mic→worklet, posts PCM chunks via callback.
 - **`src/hooks/useWebSocket.ts`** — Manages WS lifecycle. Auto-sends `session.start` on connect. Dispatches incoming JSON to Zustand store.
 - **`src/hooks/usePlayback.ts`** — Queue-based audio playback at 24kHz for bot TTS audio. Gapless scheduling with flush support for barge-in.
-- **`src/stores/sessionStore.ts`** — Zustand store: `view` (setup/session/review), `sessionId`, `transcripts[]`, `feedback`, `isAnalyzing`. Three-way view routing.
+- **`src/stores/sessionStore.ts`** — Zustand store: `view` (setup/session/review), `sessionId`, `transcripts[]`, `feedback`, `isAnalyzing`. Three-way view routing. `FeedbackData` interface includes optional `phase_scores` (per-phase rubric evaluations), `dimensions` (dynamic focus area names), and `technical_accuracy_notes`. `DimensionScore` and `PhaseScoreData` interfaces for typed phase evaluation data.
 - **`src/components/SessionSetup/`** — Scenario selection screen.
 - **`src/components/LiveSession/`** — Active interview UI. `VadIndicator`, `BotSpeakingIndicator`, `TranscriptList` subscribe to individual store slices to prevent re-renders. "End & Review" triggers async analysis flow.
-- **`src/components/Review/`** — Post-session dashboard with overall score, radar chart (recharts), filler word count, best moment/biggest opportunity cards, and full transcript replay.
+- **`src/components/Review/`** — Post-session dashboard. Split into sub-components: `OverallSummary` (dynamic radar chart adapting to scenario focus areas, overall score, feedback cards, technical accuracy notes), `PhaseTimeline` (vertical list of expandable `PhaseCard` components with per-dimension score bars, evidence quotes, and stronger answer suggestions), `TranscriptReplay` (phase-grouped transcript with dividers). Falls back to legacy 3-dimension radar when phase scores are unavailable.
 
 ## Key Conventions
 
@@ -106,7 +106,9 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 - React 19 with strict mode enabled
 - All system prompts include plain-text audio instruction (no emojis, no markdown) to prevent TTS issues
 - Database: SQLite at `backend/sessions.db`, auto-created on startup
-- LLM feedback responses are stripped of markdown code fences before JSON parsing
+- LLM feedback uses Pydantic AI agents (`pydantic-ai`) for type-safe structured output validation instead of raw JSON parsing
+- Feedback evaluation uses rubric anchoring (3/5/7/9 levels defined in scenario YAMLs) with per-phase scoring when rubrics are available
+- Database schema uses additive migrations (`ALTER TABLE ADD COLUMN`) for backward compatibility with existing `sessions.db`
 - RAG knowledge base is optional — app works without Ollama or ingested content (graceful degradation)
 - Qdrant vector store persists at `backend/knowledge/qdrant_db/` (gitignored)
 - Knowledge base content lives in `backend/knowledge/content/` organized by topic subdirectory

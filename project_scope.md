@@ -148,24 +148,25 @@ evaluation_criteria:
 
 ### 3. Post-Session Feedback & Scoring
 
-After each session, the LLM reviews the full transcript and generates structured feedback.
+After each session, the LLM reviews the transcript in a multi-pass evaluation using Pydantic AI for type-safe structured output.
 
-**Feedback dimensions:**
-- **Clarity** — Were explanations easy to follow?
-- **Structure** — Did answers have a logical flow?
-- **Depth** — Were concepts explored thoroughly?
-- **Conciseness** — Any rambling or filler?
-- **Confidence signals** — Hedging language, filler words ("um", "like", "basically")
-- **Technical accuracy** — Were claims correct?
+**Multi-dimensional rubric evaluation (current implementation):**
+- Each scenario defines rubric anchors (levels 3/5/7/9) per focus area in YAML
+- Transcripts segmented by interview phase, each phase evaluated independently
+- Per-phase: dimension scores with rubric level, transcript evidence quotes, improvement suggestions, and stronger-answer examples
+- Summary agent synthesizes per-phase results into overall clarity, structure, and depth scores
+- RAG-grounded evaluation cross-references candidate claims against local knowledge base
+- Falls back to legacy single-call evaluation for scenarios without rubrics defined
 
 **Output format:**
-- Overall score (1–10) with brief justification
-- Per-dimension scores with specific examples from the transcript
-- "Best moment" — highlight where the candidate was strongest
-- "Biggest opportunity" — one specific thing to improve next time
-- Filler word count and frequency analysis (computed from transcript, not LLM)
+- Overall score (0–10) with best moment and biggest opportunity
+- Dynamic radar chart adapting dimensions to scenario focus areas
+- Per-phase expandable cards with dimension score bars, evidence quotes, and suggestions
+- Phase-grouped transcript replay with dividers
+- Filler word count and frequency analysis (regex-based, not LLM)
+- Technical accuracy notes (when RAG knowledge base is available)
 
-**Trend tracking:** SQLite stores scores over time so you can see improvement across sessions.
+**Trend tracking:** SQLite stores scores, per-phase evaluations (`PhaseScore` table), and phase-annotated transcripts for review.
 
 ### 4. Polished UI
 
@@ -293,9 +294,11 @@ voice-interview-coach/
 │   │   ├── stt.py              # whisper.cpp integration
 │   │   └── tts.py              # Kokoro TTS wrapper
 │   ├── conversation/
-│   │   ├── manager.py          # Turn-taking, context management
-│   │   ├── llm.py              # Ollama client
-│   │   └── feedback.py         # Post-session analysis
+│   │   ├── manager.py          # Legacy message history + sentence chunking
+│   │   ├── phases.py           # Phase-aware InterviewConductor (state machine)
+│   │   ├── router.py           # LLM-based phase transition router
+│   │   ├── llm.py              # LM Studio OpenAI client
+│   │   └── feedback.py         # Pydantic AI rubric evaluation + legacy scoring
 │   ├── scenarios/
 │   │   ├── loader.py           # YAML scenario parser
 │   │   └── templates/          # Built-in scenario YAML files
