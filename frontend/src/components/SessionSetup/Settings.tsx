@@ -2,12 +2,20 @@ import { useEffect, useState } from 'react'
 import { useProfileStore } from '../../stores/profileStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 
+const CUSTOM_MODEL_VALUE = '__custom__'
+
 export function Settings({ onClose }: { onClose: () => void }) {
   const { settings, isLoading, fetchSettings, updateSettings } = useSettingsStore()
   const { dimensions, resetFullProfile, resetDimensions } = useProfileStore()
   const [localVad, setLocalVad] = useState(800)
   const [localVoice, setLocalVoice] = useState('')
   const [localModel, setLocalModel] = useState('')
+  const [localProvider, setLocalProvider] = useState('lmstudio')
+  const [localMlxModel, setLocalMlxModel] = useState('')
+  const [customMlxModel, setCustomMlxModel] = useState('')
+  const [localModelDirs, setLocalModelDirs] = useState<string[]>([])
+  const [newDirPath, setNewDirPath] = useState('')
+  const [showDirs, setShowDirs] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [confirmFullReset, setConfirmFullReset] = useState(false)
   const [selectedDims, setSelectedDims] = useState<Set<string>>(new Set())
@@ -23,14 +31,30 @@ export function Settings({ onClose }: { onClose: () => void }) {
       setLocalVad(settings.vad_silence_ms)
       setLocalVoice(settings.kokoro_voice)
       setLocalModel(settings.llm_model)
+      setLocalProvider(settings.llm_provider)
+      setLocalModelDirs(settings.mlx_model_dirs)
+      // Check if current mlx_model matches a local or preset model
+      const isLocal = settings.local_mlx_models.some(m => m.id === settings.mlx_model)
+      const isPreset = settings.available_mlx_models.some(p => p.id === settings.mlx_model)
+      if (isLocal || isPreset) {
+        setLocalMlxModel(settings.mlx_model)
+        setCustomMlxModel('')
+      } else {
+        setLocalMlxModel(CUSTOM_MODEL_VALUE)
+        setCustomMlxModel(settings.mlx_model)
+      }
     }
   }, [settings])
 
   const handleSave = async () => {
+    const mlxModel = localMlxModel === CUSTOM_MODEL_VALUE ? customMlxModel : localMlxModel
     await updateSettings({
       vad_silence_ms: localVad,
       kokoro_voice: localVoice,
       llm_model: localModel,
+      llm_provider: localProvider,
+      mlx_model: mlxModel,
+      mlx_model_dirs: localModelDirs,
     })
     setDirty(false)
   }
@@ -44,6 +68,10 @@ export function Settings({ onClose }: { onClose: () => void }) {
       </div>
     )
   }
+
+  const isCustomMlx = localMlxModel === CUSTOM_MODEL_VALUE
+  const hasLocalModels = settings.local_mlx_models.length > 0
+  const hasPresets = settings.available_mlx_models.length > 0
 
   return (
     <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4 mb-6">
@@ -103,24 +131,177 @@ export function Settings({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        {/* LLM Model */}
+        {/* LLM Provider */}
         <div>
-          <label className="block text-sm text-gray-400 mb-1">LLM Model</label>
-          <select
-            value={localModel}
-            onChange={(e) => {
-              setLocalModel(e.target.value)
-              setDirty(true)
-            }}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-100 text-sm"
-          >
-            {settings.available_models.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
+          <label className="block text-sm text-gray-400 mb-2">LLM Provider</label>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setLocalProvider('lmstudio')
+                setDirty(true)
+              }}
+              className={`flex-1 px-3 py-2 text-sm rounded-lg border transition-colors ${
+                localProvider === 'lmstudio'
+                  ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                  : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600'
+              }`}
+            >
+              LM Studio
+            </button>
+            <button
+              onClick={() => {
+                setLocalProvider('mlx')
+                setDirty(true)
+              }}
+              className={`flex-1 px-3 py-2 text-sm rounded-lg border transition-colors ${
+                localProvider === 'mlx'
+                  ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                  : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600'
+              }`}
+            >
+              MLX (Local)
+            </button>
+          </div>
+          <p className="text-xs text-gray-600 mt-1">
+            {localProvider === 'mlx'
+              ? 'Runs models locally — no external server needed'
+              : 'Requires LM Studio running on port 1234'}
+          </p>
         </div>
+
+        {/* LLM Model (LM Studio) */}
+        {localProvider === 'lmstudio' && (
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">LLM Model</label>
+            <select
+              value={localModel}
+              onChange={(e) => {
+                setLocalModel(e.target.value)
+                setDirty(true)
+              }}
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-100 text-sm"
+            >
+              {settings.available_models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* MLX Model */}
+        {localProvider === 'mlx' && (
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">MLX Model</label>
+            <select
+              value={localMlxModel}
+              onChange={(e) => {
+                setLocalMlxModel(e.target.value)
+                setDirty(true)
+              }}
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-100 text-sm"
+            >
+              {hasLocalModels && (
+                <optgroup label="Local Models">
+                  {settings.local_mlx_models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {hasPresets && (
+                <optgroup label="Download from HuggingFace">
+                  {settings.available_mlx_models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label} ({m.size})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <option value={CUSTOM_MODEL_VALUE}>Custom...</option>
+            </select>
+            {isCustomMlx && (
+              <input
+                type="text"
+                value={customMlxModel}
+                onChange={(e) => {
+                  setCustomMlxModel(e.target.value)
+                  setDirty(true)
+                }}
+                placeholder="mlx-community/Model-Name-4bit or /path/to/model"
+                className="w-full mt-2 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-100 text-sm placeholder-gray-600"
+              />
+            )}
+          </div>
+        )}
+
+        {/* Model Directories (MLX only) */}
+        {localProvider === 'mlx' && (
+          <div>
+            <button
+              onClick={() => setShowDirs(!showDirs)}
+              className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1"
+            >
+              <span className={`transition-transform ${showDirs ? 'rotate-90' : ''}`}>
+                &#9654;
+              </span>
+              Model Directories
+            </button>
+            {showDirs && (
+              <div className="mt-2 space-y-2">
+                {localModelDirs.map((dir, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="flex-1 text-xs text-gray-400 font-mono truncate" title={dir}>
+                      {dir}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setLocalModelDirs(localModelDirs.filter((_, j) => j !== i))
+                        setDirty(true)
+                      }}
+                      className="text-gray-600 hover:text-red-400 text-xs px-1"
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ))}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newDirPath}
+                    onChange={(e) => setNewDirPath(e.target.value)}
+                    placeholder="/path/to/models"
+                    className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-100 text-xs font-mono placeholder-gray-600"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newDirPath.trim()) {
+                        setLocalModelDirs([...localModelDirs, newDirPath.trim()])
+                        setNewDirPath('')
+                        setDirty(true)
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (newDirPath.trim()) {
+                        setLocalModelDirs([...localModelDirs, newDirPath.trim()])
+                        setNewDirPath('')
+                        setDirty(true)
+                      }
+                    }}
+                    className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded"
+                  >
+                    Add
+                  </button>
+                </div>
+                <p className="text-xs text-gray-600">
+                  Directories are scanned for MLX models (config.json + safetensors)
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Save */}
         {dirty && (

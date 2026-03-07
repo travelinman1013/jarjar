@@ -11,8 +11,6 @@ import subprocess
 import sys
 import urllib.request
 
-from .llm import MLX_MODEL
-
 logger = logging.getLogger(__name__)
 
 MLX_SERVER_PORT = int(os.environ.get("MLX_SERVER_PORT", "8642"))
@@ -33,6 +31,7 @@ async def ensure_mlx_server() -> str:
         return MLX_SERVER_BASE_URL
 
     import asyncio
+    from .llm import MLX_MODEL
 
     logger.info(
         "Starting local MLX inference server (model=%s, port=%d)...",

@@ -30,6 +30,12 @@ FILLER_PATTERN = re.compile(
 _cached_model = None
 
 
+def invalidate_caches():
+    """Reset cached model (call when provider or model changes)."""
+    global _cached_model
+    _cached_model = None
+
+
 async def _get_model():
     """Lazily resolve the Pydantic AI model based on LLM_PROVIDER."""
     global _cached_model

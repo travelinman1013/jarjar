@@ -539,9 +539,20 @@ async def reset_profile_dimensions(req: DimensionResetRequest):
     return {"reset": "selective", "dimensions_cleared": cleared}
 
 
+MLX_MODEL_PRESETS = [
+    {"id": "mlx-community/Llama-3.2-3B-Instruct-4bit", "label": "Llama 3.2 3B", "size": "~2GB"},
+    {"id": "mlx-community/Mistral-7B-Instruct-v0.3-4bit", "label": "Mistral 7B", "size": "~4GB"},
+    {"id": "mlx-community/Qwen2.5-14B-Instruct-4bit", "label": "Qwen 2.5 14B", "size": "~8GB"},
+    {"id": "mlx-community/Qwen2.5-32B-Instruct-4bit", "label": "Qwen 2.5 32B", "size": "~18GB"},
+]
+
+
 class SettingsUpdate(BaseModel):
     vad_silence_ms: int | None = None
     llm_model: str | None = None
+    llm_provider: str | None = None
+    mlx_model: str | None = None
+    mlx_model_dirs: list[str] | None = None
     kokoro_voice: str | None = None
 
 
@@ -560,14 +571,24 @@ async def get_settings():
     except Exception:
         pass
 
+    from conversation.model_scanner import scan_local_models, MLX_MODEL_DIRS
+    local_models = scan_local_models()
+    local_labels = {m["label"] for m in local_models}
+    # Filter presets to remove any that exist locally (prefer local copy)
+    filtered_presets = [p for p in MLX_MODEL_PRESETS if p["id"] not in local_labels]
+
     return {
         "vad_silence_ms": vad_module.SILENCE_THRESHOLD_MS,
         "llm_provider": llm_module.LLM_PROVIDER,
         "llm_model": llm_module.LLM_MODEL,
         "llm_base_url": llm_module.LLM_BASE_URL,
+        "mlx_model": llm_module.MLX_MODEL,
         "kokoro_voice": tts_module.KOKORO_VOICE,
         "available_voices": available_voices,
         "available_models": available_models,
+        "available_mlx_models": filtered_presets,
+        "local_mlx_models": local_models,
+        "mlx_model_dirs": MLX_MODEL_DIRS,
     }
 
 
@@ -579,6 +600,39 @@ async def update_settings(update: SettingsUpdate):
 
     if update.vad_silence_ms is not None:
         vad_module.SILENCE_THRESHOLD_MS = max(300, min(2000, update.vad_silence_ms))
+
+    if update.llm_provider is not None:
+        if update.llm_provider not in ("lmstudio", "mlx"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid provider '{update.llm_provider}'. Choose 'lmstudio' or 'mlx'.",
+            )
+        if update.llm_provider != llm_module.LLM_PROVIDER:
+            llm_module.LLM_PROVIDER = update.llm_provider
+            import conversation.feedback as feedback_module
+            import conversation.router as router_module
+            from conversation.mlx_server import shutdown_mlx_server
+            llm_module.invalidate_caches()
+            feedback_module.invalidate_caches()
+            router_module.invalidate_caches()
+            if update.llm_provider != "mlx":
+                shutdown_mlx_server()
+
+    if update.mlx_model is not None:
+        if update.mlx_model != llm_module.MLX_MODEL:
+            llm_module.MLX_MODEL = update.mlx_model
+            if llm_module.LLM_PROVIDER == "mlx":
+                import conversation.feedback as feedback_module
+                import conversation.router as router_module
+                from conversation.mlx_server import shutdown_mlx_server
+                shutdown_mlx_server()
+                llm_module.invalidate_caches()
+                feedback_module.invalidate_caches()
+                router_module.invalidate_caches()
+
+    if update.mlx_model_dirs is not None:
+        import conversation.model_scanner as scanner_module
+        scanner_module.MLX_MODEL_DIRS = update.mlx_model_dirs
 
     if update.llm_model is not None:
         llm_module.LLM_MODEL = update.llm_model
@@ -592,13 +646,31 @@ async def update_settings(update: SettingsUpdate):
             )
         tts_module.KOKORO_VOICE = update.kokoro_voice
 
+    available_models = [llm_module.LLM_MODEL]
+    if llm_module.LLM_PROVIDER == "lmstudio":
+        try:
+            models = await llm_module.client.models.list()
+            available_models = [m.id for m in models.data]
+        except Exception:
+            pass
+
+    from conversation.model_scanner import scan_local_models, MLX_MODEL_DIRS
+    local_models = scan_local_models()
+    local_labels = {m["label"] for m in local_models}
+    filtered_presets = [p for p in MLX_MODEL_PRESETS if p["id"] not in local_labels]
+
     return {
         "vad_silence_ms": vad_module.SILENCE_THRESHOLD_MS,
+        "llm_provider": llm_module.LLM_PROVIDER,
         "llm_model": llm_module.LLM_MODEL,
         "llm_base_url": llm_module.LLM_BASE_URL,
+        "mlx_model": llm_module.MLX_MODEL,
         "kokoro_voice": tts_module.KOKORO_VOICE,
         "available_voices": tts.get_voices(),
-        "available_models": [llm_module.LLM_MODEL],
+        "available_models": available_models,
+        "available_mlx_models": filtered_presets,
+        "local_mlx_models": local_models,
+        "mlx_model_dirs": MLX_MODEL_DIRS,
     }
 
 

@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 _cached_client: AsyncOpenAI | None = None
 
 
+def invalidate_caches():
+    """Reset cached client (call when provider or model changes)."""
+    global _cached_client
+    _cached_client = None
+
+
 async def _get_client() -> AsyncOpenAI:
     """Resolve the OpenAI client based on LLM_PROVIDER."""
     global _cached_client

@@ -25,6 +25,12 @@ client = AsyncOpenAI(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
 _mlx_client: AsyncOpenAI | None = None
 
 
+def invalidate_caches():
+    """Reset cached mlx client (call when provider or model changes)."""
+    global _mlx_client
+    _mlx_client = None
+
+
 async def _get_mlx_client() -> AsyncOpenAI:
     """Get or create an AsyncOpenAI client pointed at the local mlx_lm.server."""
     global _mlx_client
