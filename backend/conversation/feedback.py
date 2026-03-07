@@ -17,7 +17,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from storage.db import get_diagram_snapshot_for_phase
-from .llm import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
+from .llm import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_PROVIDER
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,25 @@ FILLER_PATTERN = re.compile(
 
 # ── Pydantic AI model setup ─────────────────────────────────────────────────
 
-_provider = OpenAIProvider(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
-_model = OpenAIChatModel(LLM_MODEL, provider=_provider)
+_cached_model = None
+
+
+async def _get_model():
+    """Lazily resolve the Pydantic AI model based on LLM_PROVIDER."""
+    global _cached_model
+    if _cached_model is not None:
+        return _cached_model
+
+    if LLM_PROVIDER == "mlx":
+        from .mlx_server import ensure_mlx_server
+        base_url = await ensure_mlx_server()
+        provider = OpenAIProvider(base_url=base_url, api_key="mlx")
+        _cached_model = OpenAIChatModel("default", provider=provider)
+    else:
+        provider = OpenAIProvider(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
+        _cached_model = OpenAIChatModel(LLM_MODEL, provider=provider)
+
+    return _cached_model
 
 
 # ── Output models ───────────────────────────────────────────────────────────
@@ -75,7 +92,6 @@ class SummaryResult(BaseModel):
 # ── Agents ──────────────────────────────────────────────────────────────────
 
 _phase_agent = Agent(
-    _model,
     output_type=PhaseEvaluationResult,
     instructions=(
         "You are an expert interview coach evaluating a single phase of an interview. "
@@ -86,7 +102,6 @@ _phase_agent = Agent(
 )
 
 _summary_agent = Agent(
-    _model,
     output_type=SummaryResult,
     instructions=(
         "You are an expert interview coach providing a holistic summary "
@@ -98,7 +113,6 @@ _summary_agent = Agent(
 )
 
 _legacy_agent = Agent(
-    _model,
     output_type=LegacyFeedbackResult,
     instructions=(
         "You are an expert interview coach. Analyze the following interview "
@@ -243,7 +257,7 @@ async def generate_rubric_feedback(
         prompt = "\n".join(prompt_parts)
 
         try:
-            result = await _phase_agent.run(prompt)
+            result = await _phase_agent.run(prompt, model=await _get_model())
             evaluation = result.output
 
             phase_score_data = {
@@ -309,7 +323,7 @@ async def _generate_summary(
     )
 
     try:
-        result = await _summary_agent.run(prompt)
+        result = await _summary_agent.run(prompt, model=await _get_model())
         return result.output.model_dump()
     except Exception:
         logger.exception("Summary generation failed, computing from phase scores")
@@ -387,7 +401,7 @@ async def generate_feedback_legacy(
     prompt = "\n".join(prompt_parts)
 
     try:
-        result = await _legacy_agent.run(prompt)
+        result = await _legacy_agent.run(prompt, model=await _get_model())
         return result.output.model_dump()
     except Exception:
         logger.exception("Legacy feedback generation failed")

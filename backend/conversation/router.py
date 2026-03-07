@@ -12,9 +12,33 @@ import logging
 
 from pydantic import BaseModel
 
-from conversation.llm import client, LLM_MODEL
+from openai import AsyncOpenAI
+
+from conversation.llm import client, LLM_MODEL, LLM_PROVIDER
 
 logger = logging.getLogger(__name__)
+
+_cached_client: AsyncOpenAI | None = None
+
+
+async def _get_client() -> AsyncOpenAI:
+    """Resolve the OpenAI client based on LLM_PROVIDER."""
+    global _cached_client
+    if _cached_client is not None:
+        return _cached_client
+
+    if LLM_PROVIDER == "mlx":
+        from conversation.mlx_server import ensure_mlx_server
+        base_url = await ensure_mlx_server()
+        _cached_client = AsyncOpenAI(base_url=base_url, api_key="mlx")
+    else:
+        _cached_client = client
+
+    return _cached_client
+
+
+def _get_model_name() -> str:
+    return "default" if LLM_PROVIDER == "mlx" else LLM_MODEL
 
 
 class PhaseDecision(BaseModel):
@@ -88,8 +112,9 @@ async def evaluate_phase_transition(conductor) -> PhaseDecision:
     ]
 
     try:
-        response = await client.chat.completions.create(
-            model=LLM_MODEL,
+        active_client = await _get_client()
+        response = await active_client.chat.completions.create(
+            model=_get_model_name(),
             messages=router_messages,
             temperature=0.1,
             max_tokens=128,

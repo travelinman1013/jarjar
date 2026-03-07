@@ -99,6 +99,9 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    from conversation.mlx_server import shutdown_mlx_server
+    shutdown_mlx_server()
+
 
 app = FastAPI(title="Voice Interview Coach", lifespan=lifespan)
 
