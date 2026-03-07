@@ -28,8 +28,8 @@ A fully local, real-time voice conversation app for practicing mock interviews a
 │                              └────────┬──────────┘  │
 │                                       │              │
 │  ┌────────────┐  ┌────────┐  ┌───────▼──────────┐  │
-│  │ Audio Out  │← │  TTS   │← │  LLM (Ollama)    │  │
-│  │ (stream)   │  │ Engine │  │  70B+ local       │  │
+│  │ Audio Out  │← │  TTS   │← │  LLM (LM Studio  │  │
+│  │ (stream)   │  │ Engine │  │  or mlx_lm.server)│  │
 │  └────────────┘  └────────┘  └──────────────────┘  │
 └─────────────────────────────────────────────────────┘
 ```
@@ -51,10 +51,12 @@ A fully local, real-time voice conversation app for practicing mock interviews a
 - **Role**: Segments audio into speech chunks, triggers transcription, manages turn-taking
 - **Key tuning**: Silence threshold (~800ms) to distinguish pauses from turn completion
 
-### LLM: Ollama
+### LLM: LM Studio or MLX (pluggable)
 
-- **Primary model**: Qwen 2.5 72B or Llama 3.3 70B (both fit comfortably in 256GB)
-- **Why Ollama**: Clean API, model management, optimized for Apple Silicon
+- **Primary model**: Any model loaded in LM Studio, or any MLX-format model from HuggingFace/local disk
+- **LM Studio** (`LLM_PROVIDER=lmstudio`): OpenAI-compatible API on localhost:1234. Supports any GGUF model.
+- **MLX** (`LLM_PROVIDER=mlx`): Managed `mlx_lm.server` subprocess on port 8642. Loads safetensors models optimized for Apple Silicon. No external server needed.
+- **Runtime switching**: Provider and model changeable from the Settings panel without restart. Local model directories scanned for available MLX models.
 - **Streaming**: Token-by-token streaming so TTS can start before full response completes
 - **Context window**: 8K–16K tokens per session (plenty for a 30-min interview)
 
@@ -325,7 +327,7 @@ Three main screens:
 |-------|----------------|-------|
 | VAD detection | < 100ms | Silero is very fast |
 | STT (whisper) | < 500ms | For a typical 5–10s utterance on M3 Ultra |
-| LLM first token | < 300ms | 70B model with Ollama on 256GB |
+| LLM first token | < 300ms | 70B model with LM Studio/MLX on 256GB |
 | TTS first audio | < 300ms | Kokoro sentence-level streaming |
 | **Total turn latency** | **< 1.5s** | From user stops speaking → bot starts speaking |
 
@@ -347,14 +349,16 @@ voice-interview-coach/
 │   │   ├── manager.py          # Legacy message history + sentence chunking
 │   │   ├── phases.py           # Phase-aware InterviewConductor (state machine)
 │   │   ├── router.py           # LLM-based phase transition router
-│   │   ├── llm.py              # LM Studio OpenAI client
+│   │   ├── llm.py              # Pluggable LLM provider (LM Studio / MLX)
+│   │   ├── mlx_server.py       # Managed mlx_lm.server subprocess lifecycle
+│   │   ├── model_scanner.py    # Local MLX model directory scanner
 │   │   └── feedback.py         # Pydantic AI rubric evaluation + diagram context
 │   ├── diagram/
 │   │   └── serializer.py       # tldraw snapshot → text serializer (spatial grid)
 │   ├── scenarios/
 │   │   ├── loader.py           # YAML scenario parser
 │   │   └── templates/          # Built-in scenario YAML files
-│   ├── profile/
+│   ├── skill_profile/
 │   │   ├── fsrs_engine.py      # FSRS spaced repetition wrapper
 │   │   └── manager.py          # Skill profile CRUD + recommendations
 │   ├── storage/
@@ -384,10 +388,10 @@ voice-interview-coach/
 
 1. **Whisper model size** — `large-v3` gives best accuracy but `medium` is 3x faster. Start with large, drop down if latency is an issue (unlikely on your hardware).
 
-2. **LLM model choice** — Qwen 2.5 72B vs Llama 3.3 70B vs DeepSeek. Worth testing a few to see which gives the most natural interviewer persona.
+2. **LLM model choice** — Qwen 2.5 72B vs Llama 3.3 70B vs DeepSeek. Worth testing a few to see which gives the most natural interviewer persona. ✅ Model switchable at runtime from Settings panel — both LM Studio and MLX models supported.
 
-3. **TTS voice** — Kokoro has multiple voices. Pick one that sounds like a professional interviewer, not a podcast host.
+3. **TTS voice** — Kokoro has multiple voices. Pick one that sounds like a professional interviewer, not a podcast host. ✅ Voice selectable from Settings panel.
 
-4. **Electron vs. browser** — Starting as a web app (localhost) is simpler. Could wrap in Electron later for a native feel if desired.
+4. **Electron vs. browser** — Starting as a web app (localhost) is simpler. Could wrap in Tauri v2 later for a native DMG. See `HANDOFF-distribution-readiness.md` for packaging plan.
 
 5. **Conversation memory across sessions** — ✅ Implemented via adaptive skill profile. FSRS tracks per-dimension scores across sessions and recommends what to practice next based on retrievability decay.
