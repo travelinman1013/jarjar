@@ -24,11 +24,11 @@ npm run build     # TypeScript check + production build
 npm run lint      # ESLint
 ```
 
-### LM Studio
-Must be running on `http://localhost:1234` with a model loaded before starting sessions. Configured via `backend/.env`.
+### LM Studio (when LLM_PROVIDER=lmstudio)
+Must be running on `http://localhost:1234` with a model loaded before starting sessions. Configured via `backend/.env`. When `LLM_PROVIDER=mlx`, LM Studio is not required — inference runs in-process via mlx-lm.
 
-### Ollama (for RAG embeddings)
-Must be running with an embedding model pulled before using the RAG knowledge base.
+### Ollama (optional, when EMBEDDING_PROVIDER=ollama)
+Only needed if `EMBEDDING_PROVIDER=ollama` in `.env`. Default provider is `fastembed` (local ONNX, no server).
 ```bash
 ollama pull nomic-embed-text
 ollama serve                        # Runs on :11434
@@ -52,8 +52,8 @@ python -m knowledge.ingest delete system_design          # Re-ingest
 ```
 Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
     → FastAPI → Silero VAD (speech detection) → mlx-whisper (transcription)
-    → RAG retrieval (Qdrant + Ollama embeddings, optional)
-    → LM Studio LLM (streaming response) → Kokoro TTS (speech synthesis)
+    → RAG retrieval (sqlite-vec + fastembed/Ollama embeddings, optional)
+    → LLM (LM Studio or mlx-lm, streaming response) → Kokoro TTS (speech synthesis)
     → WebSocket binary+JSON frames → Zustand store → React UI
 ```
 
@@ -93,19 +93,19 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 - **`audio/vad.py`** — Silero VAD wrapper. 512-sample windows (32ms), threshold 0.7. Silence threshold configurable via `VAD_SILENCE_MS` env var (default 800ms). Constructor accepts optional `silence_ms` parameter for per-session override (used by agent-based sessions).
 - **`audio/stt.py`** — mlx-whisper wrapper. Model: `mlx-community/whisper-large-v3-turbo`. Synchronous `transcribe_sync()`, language pinned to English.
 - **`audio/tts.py`** — Kokoro TTS (ONNX). Strips non-speech characters and normalizes whitespace before synthesis. Returns Int16 PCM at 24kHz. `get_voices()` method exposes available Kokoro voices for the settings API.
-- **`conversation/llm.py`** — AsyncOpenAI client pointing to LM Studio. Streaming `stream_chat_completion()` for conversation. Exports `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` used by feedback agents.
+- **`conversation/llm.py`** — Pluggable LLM provider. `LLM_PROVIDER=lmstudio` (default) uses AsyncOpenAI client pointing to LM Studio. `LLM_PROVIDER=mlx` uses mlx-lm for in-process inference via `stream_generate()` with async queue bridging. Streaming `stream_chat_completion()` routes to the configured provider. Exports `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` used by feedback agents.
 - **`conversation/manager.py`** — Legacy flat conversation manager (superseded by `phases.py`). `chunk_sentences()` buffers streaming tokens into complete sentences for TTS.
 - **`conversation/phases.py`** — Phase-aware `InterviewConductor` replacing `ConversationManager`. State machine with phase-specific system prompt injection, turn counting, context window management (max 40 messages), RAG context injection via `set_rag_context()`, and diagram context injection via `set_diagram_context()`.
 - **`conversation/router.py`** — Lightweight LLM-based phase transition router. Runs off the hot path after each bot response. Uses `PhaseDecision` Pydantic model with `should_advance`, `next_phase`, `reasoning`. Force-advances at `max_turns`.
 - **`conversation/feedback.py`** — Post-session analysis using Pydantic AI agents for type-safe structured output. `count_filler_words()` uses regex on user transcripts. `generate_rubric_feedback()` runs multi-pass per-phase evaluation with rubric anchoring (3/5/7/9 levels per focus area), transcript evidence quotes, stronger-answer suggestions, and diagram context injection (serialized tldraw text per phase). `generate_feedback_legacy()` provides backward-compatible single-call evaluation for scenarios without rubrics. Uses `DimensionScore`, `PhaseEvaluationResult`, `SummaryResult`, and `LegacyFeedbackResult` Pydantic output models with `pydantic_ai.Agent`. Optionally grounds evaluation against RAG-retrieved technical reference material.
 - **`diagram/__init__.py`** + **`diagram/serializer.py`** — tldraw snapshot to text serializer. Resilient parsing with try/except fallback, empty canvas handling, 3x3 spatial grid layout, >20 component summarization (~800 token cap).
-- **`knowledge/embedder.py`** — Async/sync wrapper around Ollama's embedding API (`nomic-embed-text`). Supports single and batch embedding.
-- **`knowledge/store.py`** — Qdrant vector store in local disk mode (no server). Collection-per-topic namespacing, cosine distance. All operations are synchronous (callers use `asyncio.to_thread()`).
-- **`knowledge/retriever.py`** — High-level RAG orchestrator. Embeds query, searches Qdrant, filters by distance threshold (0.8 max), formats chunks for system prompt injection. Returns `None` for irrelevant queries.
+- **`knowledge/embedder.py`** — Pluggable embedding provider. `EMBEDDING_PROVIDER=fastembed` (default) uses local ONNX-based embeddings via fastembed (`BAAI/bge-small-en-v1.5`, 384 dims). `EMBEDDING_PROVIDER=ollama` uses Ollama's HTTP API (`nomic-embed-text`). `create_embedder()` factory function returns the configured provider. Both implement `BaseEmbedder` with async/sync embed_query and embed_batch methods.
+- **`knowledge/store.py`** — sqlite-vec vector store in a local SQLite database (`knowledge/knowledge.db`). Collection-per-topic namespacing via `vec0` virtual tables. All operations are synchronous (callers use `asyncio.to_thread()`). Uses `serialize_float32()` for vector serialization and `k = ?` constraint for KNN queries.
+- **`knowledge/retriever.py`** — High-level RAG orchestrator. Embeds query, searches sqlite-vec store, filters by distance threshold (0.8 max), formats chunks for system prompt injection. Returns `None` for irrelevant queries.
 - **`knowledge/ingest.py`** — CLI tool for ingesting markdown/text documents into the vector store. Uses `RecursiveCharacterTextSplitter` for chunking.
-- **`profile/__init__.py`** — Candidate skill profile package.
-- **`profile/fsrs_engine.py`** — FSRS spaced repetition wrapper using `py-fsrs`. Maps 0-10 rubric scores to FSRS ratings (Again/Hard/Good/Easy). `review_skill()` advances a card's scheduling state, `compute_retrievability()` returns current recall probability.
-- **`profile/manager.py`** — Profile CRUD and recommendation logic. `update_profile_from_session()` aggregates per-phase dimension scores into the skill profile using EMA scoring (alpha=0.4) and FSRS card advancement. Idempotent: re-analysis updates scores but skips FSRS advancement. Dimension names normalized via `.lower().strip()`. `get_profile()` returns all dimensions with retrievability. `get_recommendations()` ranks scenarios by urgency (low retrievability + low scores + unpracticed dimensions). `recalculate_dimensions()` replays EMA + FSRS from remaining observations after session deletion — deletes orphaned dimensions with zero observations. `reset_profile()` / `reset_dimensions()` for full/selective profile wipe.
+- **`skill_profile/__init__.py`** — Candidate skill profile package (renamed from `profile/` to avoid shadowing Python's stdlib `profile` module).
+- **`skill_profile/fsrs_engine.py`** — FSRS spaced repetition wrapper using `py-fsrs`. Maps 0-10 rubric scores to FSRS ratings (Again/Hard/Good/Easy). `review_skill()` advances a card's scheduling state, `compute_retrievability()` returns current recall probability.
+- **`skill_profile/manager.py`** — Profile CRUD and recommendation logic. `update_profile_from_session()` aggregates per-phase dimension scores into the skill profile using EMA scoring (alpha=0.4) and FSRS card advancement. Idempotent: re-analysis updates scores but skips FSRS advancement. Dimension names normalized via `.lower().strip()`. `get_profile()` returns all dimensions with retrievability. `get_recommendations()` ranks scenarios by urgency (low retrievability + low scores + unpracticed dimensions). `recalculate_dimensions()` replays EMA + FSRS from remaining observations after session deletion — deletes orphaned dimensions with zero observations. `reset_profile()` / `reset_dimensions()` for full/selective profile wipe.
 - **`scenarios/loader.py`** — Loads YAML scenario configs from `scenarios/templates/` and `scenarios/custom/`. Each has `system_prompt`, `focus_areas`, `evaluation_criteria`, `phases`, `knowledge_collections`, `rubrics` (per-focus-area scoring anchors at levels 3/5/7/9), `phase_exemplars` (strong answer hints per phase), and `whiteboard_enabled` (boolean, enables tldraw canvas for the scenario). `save_scenario()` writes to `custom/` directory, `delete_scenario()` only allows deletion from `custom/`.
 - **`storage/models.py`** — SQLModel tables: `Session`, `TranscriptEntry` (with `phase` column for per-phase transcript grouping), `Score` (with `technical_accuracy_notes` and `dimension_names` for dynamic radar chart), `PhaseScore` (per-phase rubric evaluation results with JSON `dimension_scores`), `DiagramSnapshot` (per-phase tldraw snapshots with `snapshot_json`, `serialized_text`, `shape_count`), `Agent` (name, display_name, attribute_values JSON, scenario_type, visual_thumbnail, forked_from, timestamps), `SkillDimension` (per-skill EMA score, session count, FSRS card state), `SkillObservation` (per-session-per-dimension score audit trail with FSRS rating).
 - **`storage/db.py`** — SQLite CRUD helpers (all synchronous, called via `asyncio.to_thread()`). Includes `_run_migrations()` for additive schema changes on existing databases. `list_all_sessions()` returns paginated session list with score and transcript count via LEFT JOIN. `get_skill_trends()` returns per-dimension score history over time. `save_phase_scores()` / `get_phase_scores_by_session_id()` for per-phase rubric data. `save_diagram_snapshot()` / `get_diagram_snapshots_by_session_id()` / `get_diagram_snapshot_for_phase()` for diagram persistence. `upsert_skill_dimension()` / `get_all_skill_dimensions()` / `create_skill_observation()` / `get_skill_observations_by_session()` for skill profile persistence. `delete_session_cascade()` deletes session and all child rows (observations, scores, phase scores, diagrams, transcripts) in one transaction, returns affected dimension IDs. `reset_all_skill_data()` / `reset_skill_dimensions()` for profile reset. `get_observations_for_dimension()` / `get_skill_dimension_by_id()` / `delete_skill_dimension()` support post-deletion dimension recalculation. Agent CRUD: `create_agent()` / `get_agent_by_name()` / `list_agents()` / `update_agent()` / `update_agent_last_used()` / `delete_agent()`.
@@ -132,7 +132,7 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 
 - Audio format: 16-bit signed PCM, little-endian. 16kHz mono for mic/STT, 24kHz mono for TTS playback.
 - CORS is configured for `http://localhost:5173` only
-- Backend `.env` is gitignored; `backend/.env` holds runtime config (VAD_SILENCE_MS, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, KOKORO_VOICE, OLLAMA_BASE_URL, EMBEDDING_MODEL, QDRANT_PERSIST_DIR)
+- Backend `.env` is gitignored; `backend/.env` holds runtime config (VAD_SILENCE_MS, LLM_PROVIDER, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, MLX_MODEL, KOKORO_VOICE, EMBEDDING_PROVIDER, FASTEMBED_MODEL, OLLAMA_BASE_URL, EMBEDDING_MODEL)
 - Frontend uses Tailwind CSS v4 (CSS-based config via `@import "tailwindcss"`, no `tailwind.config.js`)
 - React 19 with strict mode enabled
 - All system prompts include plain-text audio instruction (no emojis, no markdown) to prevent TTS issues
@@ -140,8 +140,10 @@ Browser mic → AudioWorklet (Float32→Int16 PCM) → WebSocket binary frames
 - LLM feedback uses Pydantic AI agents (`pydantic-ai`) for type-safe structured output validation instead of raw JSON parsing
 - Feedback evaluation uses rubric anchoring (3/5/7/9 levels defined in scenario YAMLs) with per-phase scoring when rubrics are available
 - Database schema uses additive migrations (`ALTER TABLE ADD COLUMN`) for backward compatibility with existing `sessions.db`
-- RAG knowledge base is optional — app works without Ollama or ingested content (graceful degradation)
-- Qdrant vector store persists at `backend/knowledge/qdrant_db/` (gitignored)
+- RAG knowledge base is optional — app works without ingested content (graceful degradation). Default embedding provider (fastembed) requires no external server.
+- Vector store uses sqlite-vec, persists at `backend/knowledge/knowledge.db` (gitignored). Replaces previous Qdrant dependency.
+- Embedding provider is pluggable: `EMBEDDING_PROVIDER=fastembed` (default, local ONNX via `BAAI/bge-small-en-v1.5`) or `ollama` (requires running server). Configured in `.env`.
+- LLM provider is pluggable: `LLM_PROVIDER=lmstudio` (default, OpenAI-compatible API) or `mlx` (in-process via mlx-lm). Live conversation uses the configured provider; feedback analysis always uses the OpenAI-compatible endpoint (LM Studio or remote API).
 - Knowledge base content lives in `backend/knowledge/content/` organized by topic subdirectory
 - Candidate skill profile uses FSRS (`py-fsrs`) spaced repetition for scheduling practice recommendations
 - Skill dimension names are normalized (`.lower().strip()`) to prevent duplicates across scenario YAMLs

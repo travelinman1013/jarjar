@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from profile.fsrs_engine import compute_retrievability, review_skill, score_to_rating
+from skill_profile.fsrs_engine import compute_retrievability, review_skill, score_to_rating
 from scenarios.loader import ScenarioConfig, load_scenarios
 from storage.db import (
     create_skill_observation,

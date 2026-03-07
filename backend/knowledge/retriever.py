@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from .embedder import OllamaEmbedder
+from .embedder import BaseEmbedder
 from .store import KnowledgeStore, ChunkResult
 
 logger = logging.getLogger(__name__)
@@ -17,13 +17,13 @@ MAX_DISTANCE_THRESHOLD = 0.8
 class KnowledgeRetriever:
     """Orchestrates embedding queries and vector store retrieval.
 
-    ChromaDB operations are synchronous and are dispatched via
+    Store operations are synchronous and are dispatched via
     asyncio.to_thread() to avoid blocking the event loop.
     """
 
     def __init__(
         self,
-        embedder: OllamaEmbedder,
+        embedder: BaseEmbedder,
         store: KnowledgeStore,
         max_distance: float = MAX_DISTANCE_THRESHOLD,
     ):
@@ -47,7 +47,7 @@ class KnowledgeRetriever:
 
         query_embedding = await self.embedder.embed_query(query)
 
-        # ChromaDB is synchronous — run off the event loop
+        # Store operations are synchronous — run off the event loop
         chunks = await asyncio.to_thread(
             self.store.query_multi,
             collections,

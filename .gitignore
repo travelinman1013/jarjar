@@ -7,5 +7,6 @@ __pycache__/
 .DS_Store
 sessions.db
 backend/knowledge/qdrant_db/
+backend/knowledge/knowledge.db
 backend/models/kokoro/*.onnx
 backend/models/kokoro/*.bin

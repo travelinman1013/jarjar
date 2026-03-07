@@ -24,7 +24,7 @@ from conversation.llm import stream_chat_completion
 from conversation.manager import chunk_sentences
 from conversation.phases import InterviewConductor
 from conversation.router import evaluate_phase_transition
-from profile.manager import get_profile, get_recommendations, recalculate_dimensions, reset_dimensions, reset_profile, update_profile_from_session
+from skill_profile.manager import get_profile, get_recommendations, recalculate_dimensions, reset_dimensions, reset_profile, update_profile_from_session
 from scenarios.loader import (
     ScenarioConfig,
     load_scenarios,
@@ -84,14 +84,15 @@ async def lifespan(app: FastAPI):
 
     global knowledge_retriever
     try:
-        from knowledge.embedder import OllamaEmbedder
+        from knowledge.embedder import create_embedder
         from knowledge.store import KnowledgeStore
         from knowledge.retriever import KnowledgeRetriever
 
-        embedder = OllamaEmbedder()
+        embedder = create_embedder()
         store = KnowledgeStore()
         knowledge_retriever = KnowledgeRetriever(embedder, store)
-        logger.info("Knowledge retriever initialized.")
+        logger.info("Knowledge retriever initialized (provider: %s).",
+                     type(embedder).__name__)
     except Exception:
         logger.warning("Knowledge retriever unavailable — RAG disabled.")
         knowledge_retriever = None
@@ -558,6 +559,7 @@ async def get_settings():
 
     return {
         "vad_silence_ms": vad_module.SILENCE_THRESHOLD_MS,
+        "llm_provider": llm_module.LLM_PROVIDER,
         "llm_model": llm_module.LLM_MODEL,
         "llm_base_url": llm_module.LLM_BASE_URL,
         "kokoro_voice": tts_module.KOKORO_VOICE,

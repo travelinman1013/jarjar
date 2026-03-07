@@ -15,7 +15,7 @@ from pathlib import Path
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from .embedder import OllamaEmbedder
+from .embedder import BaseEmbedder, create_embedder
 from .store import KnowledgeStore
 
 HEADING_PATTERN = re.compile(r"^#{1,3}\s+(.+)", re.MULTILINE)
@@ -45,7 +45,7 @@ def extract_heading_for_chunk(full_text: str, chunk_text: str) -> str:
 def ingest_file(
     file_path: Path,
     collection_name: str,
-    embedder: OllamaEmbedder,
+    embedder: BaseEmbedder,
     store: KnowledgeStore,
 ) -> int:
     """Ingest a single file into a collection. Returns chunk count."""
@@ -81,7 +81,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         print(f"Error: {path} does not exist")
         sys.exit(1)
 
-    embedder = OllamaEmbedder()
+    embedder = create_embedder()
     store = KnowledgeStore()
 
     files: list[Path] = []
@@ -118,7 +118,7 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 def cmd_query(args: argparse.Namespace) -> None:
     """Test retrieval against a collection."""
-    embedder = OllamaEmbedder()
+    embedder = create_embedder()
     store = KnowledgeStore()
 
     print(f"Embedding query: '{args.text}'")
