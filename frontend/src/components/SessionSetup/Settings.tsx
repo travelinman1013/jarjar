@@ -1,8 +1,97 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useProfileStore } from '../../stores/profileStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 
 const CUSTOM_MODEL_VALUE = '__custom__'
+
+interface MlxStatus {
+  running: boolean
+  model: string | null
+  port: number
+  pid: number | null
+  uptime_seconds: number | null
+}
+
+function MlxStatusPanel() {
+  const [status, setStatus] = useState<MlxStatus | null>(null)
+  const [logs, setLogs] = useState<string[]>([])
+  const logRef = useRef<HTMLPreElement>(null)
+
+  useEffect(() => {
+    let active = true
+    const poll = async () => {
+      try {
+        const [sRes, lRes] = await Promise.all([
+          fetch('http://localhost:8000/api/mlx/status'),
+          fetch('http://localhost:8000/api/mlx/logs'),
+        ])
+        if (!active) return
+        if (sRes.ok) setStatus(await sRes.json())
+        if (lRes.ok) {
+          const d = await lRes.json()
+          setLogs(d.lines)
+        }
+      } catch {
+        // Server unreachable
+      }
+    }
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => { active = false; clearInterval(id) }
+  }, [])
+
+  useEffect(() => {
+    logRef.current?.scrollTo(0, logRef.current.scrollHeight)
+  }, [logs])
+
+  const formatUptime = (s: number) => {
+    const min = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return min > 0 ? `${min}m ${sec}s` : `${sec}s`
+  }
+
+  return (
+    <div className="rounded border border-gray-700 bg-gray-900/50 p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <div
+          className={`w-2.5 h-2.5 rounded-full ${
+            status === null
+              ? 'bg-yellow-500 animate-pulse'
+              : status.running
+                ? 'bg-green-500'
+                : 'bg-red-500'
+          }`}
+        />
+        <span className="text-sm text-gray-300">
+          {status === null
+            ? 'Checking...'
+            : status.running
+              ? 'MLX Server Running'
+              : 'MLX Server Stopped'}
+        </span>
+      </div>
+
+      {status?.running && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+          {status.model && <span title="Model">{status.model}</span>}
+          {status.pid && <span>PID {status.pid}</span>}
+          {status.uptime_seconds != null && (
+            <span>Up {formatUptime(status.uptime_seconds)}</span>
+          )}
+        </div>
+      )}
+
+      {logs.length > 0 && (
+        <pre
+          ref={logRef}
+          className="max-h-32 overflow-y-auto text-xs text-gray-500 font-mono bg-gray-950 rounded p-2 whitespace-pre-wrap"
+        >
+          {logs.join('\n')}
+        </pre>
+      )}
+    </div>
+  )
+}
 
 export function Settings({ onClose }: { onClose: () => void }) {
   const { settings, isLoading, fetchSettings, updateSettings } = useSettingsStore()
@@ -236,6 +325,9 @@ export function Settings({ onClose }: { onClose: () => void }) {
             )}
           </div>
         )}
+
+        {/* MLX Server Status */}
+        {localProvider === 'mlx' && <MlxStatusPanel />}
 
         {/* Model Directories (MLX only) */}
         {localProvider === 'mlx' && (

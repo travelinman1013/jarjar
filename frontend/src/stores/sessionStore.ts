@@ -67,6 +67,7 @@ interface SessionState {
   isBotThinking: boolean
   phaseList: { name: string; display_name: string }[]
   scenarioDuration: number | null
+  error: string | null
 
   setSession: (id: number, scenario: string, whiteboardEnabled?: boolean) => void
   clearSession: () => void
@@ -83,6 +84,7 @@ interface SessionState {
   setBotThinking: (v: boolean) => void
   setPhaseList: (phases: { name: string; display_name: string }[]) => void
   setScenarioDuration: (minutes: number | null) => void
+  setError: (msg: string | null) => void
   addTranscript: (entry: TranscriptEntry) => void
   addBotSentence: (text: string, timestamp: number) => void
   reset: () => void
@@ -108,6 +110,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
   isBotThinking: false,
   phaseList: [],
   scenarioDuration: null,
+  error: null,
 
   setSession: (id, scenario, whiteboardEnabled = false) =>
     set({
@@ -129,6 +132,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
       isBotThinking: false,
       phaseList: [],
       scenarioDuration: null,
+      error: null,
     }),
   clearSession: () =>
     set({
@@ -150,6 +154,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
       isBotThinking: false,
       phaseList: [],
       scenarioDuration: null,
+      error: null,
     }),
   setRecording: (v) => set({ isRecording: v }),
   setConnected: (v) => set({ isConnected: v }),
@@ -164,6 +169,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
   setBotThinking: (v) => set({ isBotThinking: v }),
   setPhaseList: (phases) => set({ phaseList: phases }),
   setScenarioDuration: (minutes) => set({ scenarioDuration: minutes }),
+  setError: (msg) => set({ error: msg }),
   addTranscript: (entry) =>
     set((state) => {
       // Replace existing entry with same turnId, or append
@@ -236,5 +242,6 @@ export const useSessionStore = create<SessionState>()((set) => ({
       isBotThinking: false,
       phaseList: [],
       scenarioDuration: null,
+      error: null,
     }),
 }))

@@ -17,7 +17,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from storage.db import get_diagram_snapshot_for_phase
-from .llm import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_PROVIDER
+from .llm import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_PROVIDER, MLX_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ async def _get_model():
         from .mlx_server import ensure_mlx_server
         base_url = await ensure_mlx_server()
         provider = OpenAIProvider(base_url=base_url, api_key="mlx")
-        _cached_model = OpenAIChatModel("default", provider=provider)
+        _cached_model = OpenAIChatModel(MLX_MODEL, provider=provider)
     else:
         provider = OpenAIProvider(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
         _cached_model = OpenAIChatModel(LLM_MODEL, provider=provider)

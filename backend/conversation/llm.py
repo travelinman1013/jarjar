@@ -82,16 +82,48 @@ async def _stream_mlx(
     temperature: float,
     max_tokens: int,
 ) -> AsyncIterator[str]:
-    """Stream tokens from mlx_lm.server via OpenAI-compatible API."""
+    """Stream tokens from mlx_lm.server via OpenAI-compatible API.
+
+    Filters out <think>...</think> blocks from think-capable models as a
+    safety net (the server is also started with enable_thinking=false).
+    """
     mlx_client = await _get_mlx_client()
     response = await mlx_client.chat.completions.create(
-        model="default",
+        model=MLX_MODEL,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
         stream=True,
     )
+    in_think = False
     async for chunk in response:
         content = chunk.choices[0].delta.content
-        if content:
+        if not content:
+            continue
+
+        # Fast path: not in a think block and no tag markers present
+        if not in_think and "<" not in content:
             yield content
+            continue
+
+        # Process character-by-character for think tag boundaries
+        buf = ""
+        for ch in content:
+            buf += ch
+            if not in_think:
+                if buf.endswith("<think>"):
+                    # Entered a think block — drop the tag from output
+                    buf = buf[: -len("<think>")]
+                    if buf:
+                        yield buf
+                    buf = ""
+                    in_think = True
+            else:
+                if buf.endswith("</think>"):
+                    # Exited the think block — discard everything inside
+                    buf = ""
+                    in_think = False
+
+        # Yield any remaining non-think content
+        if buf and not in_think:
+            yield buf

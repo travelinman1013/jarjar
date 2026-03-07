@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from openai import AsyncOpenAI
 
-from conversation.llm import client, LLM_MODEL, LLM_PROVIDER
+from conversation.llm import client, LLM_MODEL, LLM_PROVIDER, MLX_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ async def _get_client() -> AsyncOpenAI:
 
 
 def _get_model_name() -> str:
-    return "default" if LLM_PROVIDER == "mlx" else LLM_MODEL
+    return MLX_MODEL if LLM_PROVIDER == "mlx" else LLM_MODEL
 
 
 class PhaseDecision(BaseModel):

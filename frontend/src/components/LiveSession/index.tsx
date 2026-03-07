@@ -136,6 +136,38 @@ function PhaseProgress() {
   )
 }
 
+function ErrorBanner() {
+  const error = useSessionStore((s) => s.error)
+  const setError = useSessionStore((s) => s.setError)
+  const hoveringRef = useRef(false)
+
+  useEffect(() => {
+    if (!error) return
+    const timer = setTimeout(() => {
+      if (!hoveringRef.current) setError(null)
+    }, 10000)
+    return () => clearTimeout(timer)
+  }, [error, setError])
+
+  if (!error) return null
+
+  return (
+    <div
+      className="mx-6 mt-2 px-4 py-3 bg-red-900/50 border border-red-800 rounded-lg flex items-center justify-between"
+      onMouseEnter={() => { hoveringRef.current = true }}
+      onMouseLeave={() => { hoveringRef.current = false }}
+    >
+      <p className="text-sm text-red-300">{error}</p>
+      <button
+        onClick={() => setError(null)}
+        className="text-red-400 hover:text-red-200 text-sm ml-4 shrink-0"
+      >
+        Dismiss
+      </button>
+    </div>
+  )
+}
+
 function PreSessionBrief({ onStart }: { onStart: () => void }) {
   const scenarioName = useSessionStore((s) => s.scenarioName)
   const scenarioDuration = useSessionStore((s) => s.scenarioDuration)
@@ -394,6 +426,7 @@ export function LiveSession() {
         </header>
 
         {isRecording && <PhaseProgress />}
+        <ErrorBanner />
 
         {!isRecording ? (
           <PreSessionBrief onStart={handleStart} />

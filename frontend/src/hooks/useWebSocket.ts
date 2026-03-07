@@ -88,6 +88,9 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             break
           case 'error':
             console.error('Server error:', data.message)
+            store.setError(data.message ?? 'Unknown server error')
+            store.setBotThinking(false)
+            store.setBotSpeaking(false)
             break
         }
       } catch {

@@ -674,6 +674,18 @@ async def update_settings(update: SettingsUpdate):
     }
 
 
+@app.get("/api/mlx/status")
+async def get_mlx_server_status():
+    from conversation.mlx_server import get_mlx_status
+    return get_mlx_status()
+
+
+@app.get("/api/mlx/logs")
+async def get_mlx_server_logs():
+    from conversation.mlx_server import get_mlx_logs
+    return {"lines": get_mlx_logs()}
+
+
 @app.get("/api/sessions/{session_id}/diagrams")
 async def get_session_diagrams(session_id: int):
     return await asyncio.to_thread(get_diagram_snapshots_by_session_id, session_id)
@@ -749,6 +761,15 @@ async def run_bot_response(
                     phase,
                 )
         raise
+    except Exception as e:
+        logger.exception("LLM inference failed")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"LLM inference failed: {e}",
+            })
+        except Exception:
+            pass  # WebSocket may already be closed
 
 
 async def cancel_bot_task(task: asyncio.Task | None) -> None:
@@ -770,34 +791,46 @@ async def run_bot_response_with_routing(
     diagram_state: dict | None = None,
 ):
     """Wraps run_bot_response with post-response phase evaluation."""
-    await run_bot_response(websocket, conductor, session_id, bot_turn_id, phase)
+    try:
+        await run_bot_response(websocket, conductor, session_id, bot_turn_id, phase)
 
-    if conductor.should_evaluate_transition():
-        decision = await evaluate_phase_transition(conductor)
-        if decision.should_advance and decision.next_phase:
-            # Capture diagram snapshot for the phase that just ended
-            if diagram_state and session_id and phase:
-                snapshot = diagram_state.get("snapshot")
-                if snapshot:
-                    old_phase_cfg = conductor.phases.get(phase)
-                    old_display = old_phase_cfg.display_name if old_phase_cfg else phase
-                    await asyncio.to_thread(
-                        save_diagram_snapshot,
-                        session_id,
-                        phase,
-                        old_display,
-                        json.dumps(snapshot),
-                        diagram_state.get("serialized_text", ""),
-                        diagram_state.get("shape_count", 0),
-                    )
+        if conductor.should_evaluate_transition():
+            decision = await evaluate_phase_transition(conductor)
+            if decision.should_advance and decision.next_phase:
+                # Capture diagram snapshot for the phase that just ended
+                if diagram_state and session_id and phase:
+                    snapshot = diagram_state.get("snapshot")
+                    if snapshot:
+                        old_phase_cfg = conductor.phases.get(phase)
+                        old_display = old_phase_cfg.display_name if old_phase_cfg else phase
+                        await asyncio.to_thread(
+                            save_diagram_snapshot,
+                            session_id,
+                            phase,
+                            old_display,
+                            json.dumps(snapshot),
+                            diagram_state.get("serialized_text", ""),
+                            diagram_state.get("shape_count", 0),
+                        )
 
-            conductor.advance_phase(decision.next_phase)
-            phase_cfg = conductor.phases.get(decision.next_phase)
+                conductor.advance_phase(decision.next_phase)
+                phase_cfg = conductor.phases.get(decision.next_phase)
+                await websocket.send_json({
+                    "type": "phase_change",
+                    "phase": decision.next_phase,
+                    "display_name": phase_cfg.display_name if phase_cfg else decision.next_phase,
+                })
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.exception("Bot response pipeline failed")
+        try:
             await websocket.send_json({
-                "type": "phase_change",
-                "phase": decision.next_phase,
-                "display_name": phase_cfg.display_name if phase_cfg else decision.next_phase,
+                "type": "error",
+                "message": f"Bot response failed: {e}",
             })
+        except Exception:
+            pass
 
 
 # ── WebSocket handler ───────────────────────────────────────────────────────
@@ -930,6 +963,22 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     session_start_time = time.time()
                     logger.info(f"Session started (id={session_id})")
+
+                    # Pre-session MLX health check
+                    import conversation.llm as _llm_check
+                    if _llm_check.LLM_PROVIDER == "mlx":
+                        from conversation.mlx_server import get_mlx_status
+                        status = get_mlx_status()
+                        if not status["running"]:
+                            try:
+                                # Try to start the server proactively
+                                from conversation.mlx_server import ensure_mlx_server
+                                await ensure_mlx_server()
+                            except Exception as e:
+                                await websocket.send_json({
+                                    "type": "error",
+                                    "message": f"MLX server failed to start: {e}",
+                                })
 
                     # Include phase list for progress indicator
                     phase_list = []
