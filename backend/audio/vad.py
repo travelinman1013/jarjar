@@ -26,13 +26,13 @@ class VoiceActivityDetector:
     starts and ends (after SILENCE_THRESHOLD_MS of silence).
     """
 
-    def __init__(self):
+    def __init__(self, silence_ms: int | None = None):
         self._model = load_silero_vad(onnx=False)
         self._vad_iterator = VADIterator(
             self._model,
             threshold=SPEECH_THRESHOLD,
             sampling_rate=SAMPLE_RATE,
-            min_silence_duration_ms=SILENCE_THRESHOLD_MS,
+            min_silence_duration_ms=silence_ms if silence_ms is not None else SILENCE_THRESHOLD_MS,
         )
         self._pcm_buffer = bytearray()
         self._speech_audio = bytearray()

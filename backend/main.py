@@ -34,20 +34,26 @@ from scenarios.loader import (
     is_custom_scenario,
 )
 from storage.db import (
+    create_agent,
     create_db_and_tables,
     create_session as db_create_session,
     add_transcript_entry,
+    delete_agent,
     delete_session_cascade,
+    get_agent_by_name,
     get_diagram_snapshots_by_session_id,
     get_phase_scores_by_session_id,
     get_session_scenario,
     get_session_with_transcripts,
     get_score_by_session_id,
     get_skill_trends,
+    list_agents,
     list_all_sessions,
     save_diagram_snapshot,
     save_phase_scores,
     save_score,
+    update_agent,
+    update_agent_last_used,
     update_session_duration,
 )
 
@@ -197,6 +203,157 @@ Respond with ONLY the YAML content, no explanations or markdown fences."""
             status_code=422,
             detail=f"Failed to parse generated scenario: {str(e)}",
         )
+
+
+# ── Agent endpoints ────────────────────────────────────────────────────────
+
+
+class CreateAgentRequest(BaseModel):
+    name: str
+    display_name: str
+    attribute_values: dict  # AgentAttributes JSON
+    scenario_type: str
+    scenario_config: dict  # compiled ScenarioConfig to save as YAML
+    visual_thumbnail: str = ""
+    forked_from: str | None = None
+
+
+class UpdateAgentRequest(BaseModel):
+    display_name: str | None = None
+    attribute_values: dict | None = None
+    scenario_type: str | None = None
+    scenario_config: dict | None = None  # recompiled config
+    visual_thumbnail: str | None = None
+
+
+@app.get("/api/agents")
+async def list_all_agents():
+    agents = await asyncio.to_thread(list_agents)
+    return [
+        {
+            "name": a.name,
+            "display_name": a.display_name,
+            "attribute_values": json.loads(a.attribute_values),
+            "scenario_type": a.scenario_type,
+            "visual_thumbnail": a.visual_thumbnail,
+            "created_at": a.created_at.isoformat(),
+            "last_used": a.last_used.isoformat() if a.last_used else None,
+            "forked_from": a.forked_from,
+        }
+        for a in agents
+    ]
+
+
+@app.get("/api/agents/{name}")
+async def get_agent(name: str):
+    agent = await asyncio.to_thread(get_agent_by_name, name)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {
+        "name": agent.name,
+        "display_name": agent.display_name,
+        "attribute_values": json.loads(agent.attribute_values),
+        "scenario_type": agent.scenario_type,
+        "visual_thumbnail": agent.visual_thumbnail,
+        "created_at": agent.created_at.isoformat(),
+        "last_used": agent.last_used.isoformat() if agent.last_used else None,
+        "forked_from": agent.forked_from,
+    }
+
+
+@app.post("/api/agents", status_code=201)
+async def create_new_agent(req: CreateAgentRequest):
+    existing = await asyncio.to_thread(get_agent_by_name, req.name)
+    if existing:
+        raise HTTPException(status_code=409, detail="Agent name already exists")
+
+    # Save the scenario config as YAML
+    try:
+        config = ScenarioConfig(**req.scenario_config)
+        await asyncio.to_thread(save_scenario, config)
+    except Exception as e:
+        raise HTTPException(
+            status_code=422, detail=f"Invalid scenario config: {e}"
+        )
+
+    agent = await asyncio.to_thread(
+        create_agent,
+        name=req.name,
+        display_name=req.display_name,
+        attribute_values=json.dumps(req.attribute_values),
+        scenario_type=req.scenario_type,
+        visual_thumbnail=req.visual_thumbnail,
+        forked_from=req.forked_from,
+    )
+    return {
+        "name": agent.name,
+        "display_name": agent.display_name,
+        "created_at": agent.created_at.isoformat(),
+    }
+
+
+@app.put("/api/agents/{name}")
+async def update_existing_agent(name: str, req: UpdateAgentRequest):
+    existing = await asyncio.to_thread(get_agent_by_name, name)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # If scenario_config provided, recompile the YAML
+    if req.scenario_config:
+        try:
+            config = ScenarioConfig(**req.scenario_config)
+            await asyncio.to_thread(save_scenario, config)
+        except Exception as e:
+            raise HTTPException(
+                status_code=422, detail=f"Invalid scenario config: {e}"
+            )
+
+    agent = await asyncio.to_thread(
+        update_agent,
+        name=name,
+        display_name=req.display_name,
+        attribute_values=json.dumps(req.attribute_values) if req.attribute_values else None,
+        visual_thumbnail=req.visual_thumbnail,
+        scenario_type=req.scenario_type,
+    )
+    return {"name": agent.name, "display_name": agent.display_name}
+
+
+@app.delete("/api/agents/{name}")
+async def remove_agent(name: str):
+    agent = await asyncio.to_thread(get_agent_by_name, name)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    # Delete YAML
+    await asyncio.to_thread(delete_scenario, name)
+    # Delete metadata
+    await asyncio.to_thread(delete_agent, name)
+    return {"deleted": name}
+
+
+@app.post("/api/agents/{name}/fork")
+async def fork_agent(name: str):
+    """Fork an existing agent or built-in template."""
+    # Try agent first, then scenario template
+    agent = await asyncio.to_thread(get_agent_by_name, name)
+    if agent:
+        attrs = json.loads(agent.attribute_values)
+        return {
+            "attribute_values": attrs,
+            "scenario_type": agent.scenario_type,
+            "forked_from": name,
+        }
+
+    scenario = await asyncio.to_thread(get_scenario_by_name, name)
+    if scenario:
+        return {
+            "attribute_values": None,  # No attribute data for templates
+            "scenario_config": scenario.model_dump(),
+            "scenario_type": scenario.type,
+            "forked_from": name,
+        }
+
+    raise HTTPException(status_code=404, detail="Agent or scenario not found")
 
 
 class CreateSessionRequest(BaseModel):
@@ -451,6 +608,8 @@ async def create_session(req: CreateSessionRequest):
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
     session = await asyncio.to_thread(db_create_session, req.scenario_name)
+    # Update agent last_used if this scenario belongs to an agent
+    await asyncio.to_thread(update_agent_last_used, req.scenario_name)
     return {"session_id": session.id, "scenario_name": session.scenario_name}
 
 
@@ -654,7 +813,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg_type = data.get("type")
 
                 if msg_type == "session.start":
-                    vad.reset()
+                    # Per-session VAD silence override
+                    silence_ms = data.get("silence_ms")
+                    if silence_ms is not None:
+                        silence_ms = max(300, min(2000, int(silence_ms)))
+                        vad = VoiceActivityDetector(silence_ms=silence_ms)
+                        logger.info(f"VAD silence override: {silence_ms}ms")
+                    else:
+                        vad.reset()
                     turn_id = 0
                     session_id = data.get("session_id")
 

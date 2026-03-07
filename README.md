@@ -34,6 +34,14 @@ Built for Apple Silicon (tested on Mac Studio M3 Ultra with 256GB unified memory
 - **Skill profile with FSRS** — spaced repetition scheduling recommends which scenarios to practice next based on skill decay
 - **Session persistence** — transcripts (with phase annotations), scores, per-phase evaluations, and diagram snapshots saved to SQLite
 
+### Agent Creation Studio
+- **RPG-style character builder** — 13 attribute sliders across 4 categories (Demeanor, Behavior, Expertise, Evaluation) to configure a custom AI interviewer personality
+- **3D orb visualization** — real-time GLSL shader-driven orb that morphs as attributes change (color, particles, rings, roughness, glow)
+- **Guided wizard mode** — 7-question onboarding flow for first-time users that maps natural language answers to attribute values, with the orb animating between each answer
+- **Advanced slider mode** — full control over all 13 attributes with instant orb feedback; wizard-derived values preserved when switching modes
+- **Agent library** — save, edit, fork, and launch agents directly from the setup screen with thumbnail previews
+- **Config compiler** — translates attribute values into full backend scenario configs (system prompts, phases, rubrics, difficulty, VAD sensitivity)
+
 ### Customization
 - **AI-assisted scenario creation** — describe an interview scenario in plain text, and the LLM generates a complete config with phases, rubrics, and evaluation criteria
 - **Manual scenario editor** — full form for creating/editing scenarios: phases, focus areas, evaluation criteria, system prompts, whiteboard toggle
@@ -163,13 +171,14 @@ npm install
 
 ## Usage
 
-1. **Select a scenario** from the setup screen (Quick Warmup, Behavioral, System Design, etc.) — or create your own with the AI-assisted scenario builder
-2. **Review the pre-session brief** — scenario details, phases, and tips are shown before you start
-3. **Click "Start Recording"** — grant microphone access when prompted
-4. **Speak naturally** — the coach will respond with voice and text. Watch the timer, phase progress, and thinking indicator in the header.
-5. **Click "End & Review"** when done — the AI analyzes your performance
-6. **Review your scores** — dynamic radar chart, per-phase breakdown with rubric-grounded scores, evidence quotes, stronger-answer suggestions, diagram replay, filler word count, and full transcript
-7. **Track your progress** — browse past sessions and skill trend charts on the setup screen
+1. **Create an agent** — click "Create Agent" on the setup screen. The guided wizard asks 7 questions to configure your interviewer, or switch to advanced mode for full slider control. The 3D orb morphs in real-time as you shape the agent's personality.
+2. **Or select a built-in scenario** from the setup screen (Quick Warmup, Behavioral, System Design, etc.) — or create your own with the AI-assisted scenario builder
+3. **Review the pre-session brief** — scenario details, phases, and tips are shown before you start
+4. **Click "Start Recording"** — grant microphone access when prompted
+5. **Speak naturally** — the coach will respond with voice and text. Watch the timer, phase progress, and thinking indicator in the header.
+6. **Click "End & Review"** when done — the AI analyzes your performance
+7. **Review your scores** — dynamic radar chart, per-phase breakdown with rubric-grounded scores, evidence quotes, stronger-answer suggestions, diagram replay, filler word count, and full transcript
+8. **Track your progress** — browse past sessions and skill trend charts on the setup screen
 
 **Whiteboard**: For system design scenarios, a tldraw whiteboard panel appears alongside the transcript. Use the toggle button in the header to show/hide it mid-session. Diagrams are automatically captured at each phase transition and included in the LLM's evaluation.
 
@@ -213,16 +222,25 @@ npm install
 │       │   ├── useAudio.ts        # Mic capture at 16kHz
 │       │   ├── useWebSocket.ts    # WS lifecycle + message dispatch
 │       │   └── usePlayback.ts     # TTS audio queue at 24kHz
+│       ├── lib/
+│       │   └── agentCompiler.ts   # Attributes → ScenarioConfig compiler
 │       ├── stores/
 │       │   ├── sessionStore.ts    # Zustand state (session, phases, timer, thinking)
 │       │   ├── profileStore.ts    # Skill profile + recommendations
 │       │   ├── historyStore.ts    # Past sessions + skill trends
-│       │   └── settingsStore.ts   # Runtime settings (voice, VAD, model)
+│       │   ├── settingsStore.ts   # Runtime settings (voice, VAD, model)
+│       │   ├── agentCreatorStore.ts # Agent attributes, wizard state
+│       │   └── agentLibraryStore.ts # Saved agents CRUD
 │       └── components/
 │           ├── SessionSetup/      # Scenario selection + skill overview + history
 │           │   ├── SkillOverview  #   Skill bars with expandable trend charts
 │           │   ├── ScenarioBuilder#   AI-assisted + manual scenario creation
 │           │   └── Settings       #   Voice, VAD, model configuration panel
+│           ├── AgentCreator/      # RPG-style agent builder
+│           │   ├── OrbScene.tsx   #   R3F scene with orb entity + particles + rings
+│           │   ├── AttributePanel #   13 attribute sliders across 4 categories
+│           │   ├── WizardPanel    #   Guided 7-question wizard mode
+│           │   └── SoulPreview    #   Generated system prompt preview
 │           ├── LiveSession/       # Active interview UI + whiteboard panel
 │           │   └── WhiteboardPanel.tsx  # tldraw canvas (lazy loaded)
 │           └── Review/            # Post-session dashboard (dynamic radar,
@@ -235,7 +253,7 @@ npm install
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React 19, TypeScript, Zustand, Tailwind CSS v4, Recharts, tldraw v4 |
+| Frontend | React 19, TypeScript, Zustand, Tailwind CSS v4, Recharts, tldraw v4, React Three Fiber, Three.js |
 | Backend | FastAPI, Python 3.14, SQLModel, SQLite, Pydantic AI |
 | STT | mlx-whisper (whisper-large-v3-turbo, Apple Silicon) |
 | LLM | LM Studio (OpenAI-compatible API, local inference) |

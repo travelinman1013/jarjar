@@ -9,6 +9,7 @@ from sqlalchemy import func, text
 from sqlmodel import Session as DBSession, SQLModel, create_engine, delete, select
 
 from .models import (
+    Agent,
     DiagramSnapshot,
     PhaseScore,
     Score,
@@ -513,3 +514,86 @@ def get_session_with_transcripts(session_id: int) -> dict | None:
                 for e in entries
             ],
         }
+
+
+# ── Agent CRUD ─────────────────────────────────────────────────────────────
+
+
+def create_agent(
+    name: str,
+    display_name: str,
+    attribute_values: str,
+    scenario_type: str,
+    visual_thumbnail: str = "",
+    forked_from: str | None = None,
+) -> Agent:
+    with DBSession(engine) as db:
+        agent = Agent(
+            name=name,
+            display_name=display_name,
+            attribute_values=attribute_values,
+            scenario_type=scenario_type,
+            visual_thumbnail=visual_thumbnail,
+            forked_from=forked_from,
+        )
+        db.add(agent)
+        db.commit()
+        db.refresh(agent)
+        return agent
+
+
+def get_agent_by_name(name: str) -> Agent | None:
+    with DBSession(engine) as db:
+        return db.exec(select(Agent).where(Agent.name == name)).first()
+
+
+def list_agents() -> list[Agent]:
+    with DBSession(engine) as db:
+        return list(
+            db.exec(select(Agent).order_by(Agent.created_at.desc())).all()
+        )
+
+
+def update_agent(
+    name: str,
+    display_name: str | None = None,
+    attribute_values: str | None = None,
+    visual_thumbnail: str | None = None,
+    scenario_type: str | None = None,
+) -> Agent | None:
+    with DBSession(engine) as db:
+        agent = db.exec(select(Agent).where(Agent.name == name)).first()
+        if not agent:
+            return None
+        if display_name is not None:
+            agent.display_name = display_name
+        if attribute_values is not None:
+            agent.attribute_values = attribute_values
+        if visual_thumbnail is not None:
+            agent.visual_thumbnail = visual_thumbnail
+        if scenario_type is not None:
+            agent.scenario_type = scenario_type
+        db.add(agent)
+        db.commit()
+        db.refresh(agent)
+        return agent
+
+
+def update_agent_last_used(name: str) -> None:
+    from datetime import datetime, timezone
+    with DBSession(engine) as db:
+        agent = db.exec(select(Agent).where(Agent.name == name)).first()
+        if agent:
+            agent.last_used = datetime.now(timezone.utc)
+            db.add(agent)
+            db.commit()
+
+
+def delete_agent(name: str) -> bool:
+    with DBSession(engine) as db:
+        agent = db.exec(select(Agent).where(Agent.name == name)).first()
+        if not agent:
+            return False
+        db.delete(agent)
+        db.commit()
+        return True

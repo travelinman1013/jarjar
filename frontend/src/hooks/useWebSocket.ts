@@ -24,10 +24,14 @@ export function useWebSocket(options?: UseWebSocketOptions) {
     ws.onopen = () => {
       setIsConnected(true)
       const { sessionId } = useSessionStore.getState()
-      ws.send(JSON.stringify({
-        type: 'session.start',
-        ...(sessionId != null && { session_id: sessionId }),
-      }))
+      const silenceMs = sessionStorage.getItem('agent_silence_ms')
+      const startMsg: Record<string, unknown> = { type: 'session.start' }
+      if (sessionId != null) startMsg.session_id = sessionId
+      if (silenceMs) {
+        startMsg.silence_ms = Number(silenceMs)
+        sessionStorage.removeItem('agent_silence_ms')
+      }
+      ws.send(JSON.stringify(startMsg))
     }
 
     ws.onmessage = (event: MessageEvent) => {

@@ -2,10 +2,14 @@ import { useState, useEffect } from 'react'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useProfileStore } from '../../stores/profileStore'
 import { useHistoryStore, type PastSession } from '../../stores/historyStore'
+import { useAgentLibraryStore, type AgentData } from '../../stores/agentLibraryStore'
+import { useAgentCreatorStore, type AgentAttributes } from '../../stores/agentCreatorStore'
 import { SkillOverview } from './SkillOverview'
 import { RecommendationBadge } from './RecommendationBadge'
 import { ScenarioBuilder } from './ScenarioBuilder'
 import { Settings } from './Settings'
+import { AgentCreator } from '../AgentCreator'
+import { deriveSilenceMs } from '../../lib/agentCompiler'
 
 interface Scenario {
   name: string
@@ -39,9 +43,13 @@ export function SessionSetup() {
   const [starting, setStarting] = useState<string | null>(null)
   const [showBuilder, setShowBuilder] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showAgentCreator, setShowAgentCreator] = useState(false)
+  const [editingAgent, setEditingAgent] = useState<string | null>(null)
+  const [confirmDeleteAgent, setConfirmDeleteAgent] = useState<string | null>(null)
   const setSession = useSessionStore((s) => s.setSession)
   const { dimensions, recommendations, fetchProfile } = useProfileStore()
   const { pastSessions, fetchPastSessions } = useHistoryStore()
+  const { agents, fetchAgents, deleteAgent } = useAgentLibraryStore()
   const setFeedback = useSessionStore((s) => s.setFeedback)
   const setView = useSessionStore((s) => s.setView)
 
@@ -56,7 +64,8 @@ export function SessionSetup() {
       .finally(() => setLoading(false))
     fetchProfile()
     fetchPastSessions()
-  }, [])
+    fetchAgents()
+  }, [fetchProfile, fetchPastSessions, fetchAgents])
 
   const reloadScenarios = () => {
     fetch(`${API_BASE}/api/scenarios`)
@@ -82,6 +91,70 @@ export function SessionSetup() {
       setStarting(null)
     }
   }
+
+  const handleAgentStart = async (agent: AgentData) => {
+    setStarting(agent.name)
+    setError(null)
+    try {
+      // Restore patience-based silence_ms
+      const patience = agent.attribute_values?.behavior?.patience ?? 50
+      const silenceMs = deriveSilenceMs(patience)
+      sessionStorage.setItem('agent_silence_ms', String(silenceMs))
+
+      const res = await fetch(`${API_BASE}/api/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario_name: agent.name }),
+      })
+      if (!res.ok) throw new Error('Failed to create session')
+      const data = await res.json()
+      // Check whiteboard from the scenario
+      const scenarioRes = await fetch(`${API_BASE}/api/scenarios`)
+      const allScenarios: Scenario[] = await scenarioRes.json()
+      const matched = allScenarios.find((s) => s.name === agent.name)
+      setSession(data.session_id, data.scenario_name, matched?.whiteboard_enabled ?? false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+      setStarting(null)
+    }
+  }
+
+  const handleAgentEdit = (agent: AgentData) => {
+    // Load agent attributes into the creator store
+    const store = useAgentCreatorStore.getState()
+    store.resetAll()
+    store.setAgentName(agent.display_name)
+    store.setScenarioType(agent.scenario_type as 'system_design' | 'behavioral' | 'technical')
+    // Restore attribute sliders
+    const attrs = agent.attribute_values
+    if (attrs) {
+      for (const [category, values] of Object.entries(attrs)) {
+        for (const [key, value] of Object.entries(values as Record<string, number>)) {
+          store.setAttribute(category as keyof AgentAttributes, key, value)
+        }
+      }
+    }
+    setEditingAgent(agent.name)
+    setShowAgentCreator(true)
+  }
+
+  const handleAgentDelete = async (name: string) => {
+    await deleteAgent(name)
+    setConfirmDeleteAgent(null)
+    reloadScenarios()
+  }
+
+  const openFreshCreator = () => {
+    const s = useAgentCreatorStore.getState()
+    s.resetAll()
+    s.setWizardMode(true)
+    setEditingAgent(null)
+    setShowAgentCreator(true)
+  }
+
+  // Filter out scenarios that belong to agents (to avoid duplication)
+  const agentNames = new Set(agents.map((a) => a.name))
+  const standaloneScenarios = scenarios.filter((s) => !agentNames.has(s.name))
 
   return (
     <div className="flex flex-col h-screen">
@@ -122,8 +195,108 @@ export function SessionSetup() {
           <SkillOverview dimensions={dimensions} />
         </div>
 
+        {/* Agent Library */}
+        {agents.length > 0 && (
+          <div className="max-w-3xl mx-auto mb-6">
+            <h2 className="text-sm font-medium text-indigo-400 uppercase tracking-wide mb-3">
+              Your Agents
+            </h2>
+            <div className="grid gap-3">
+              {agents.map((agent) => (
+                <div
+                  key={agent.name}
+                  className="rounded-lg border border-indigo-500/30 bg-gray-800 p-4 hover:bg-gray-700 transition-colors"
+                >
+                  <div className="flex items-center gap-4">
+                    {/* Thumbnail */}
+                    {agent.visual_thumbnail ? (
+                      <img
+                        src={agent.visual_thumbnail}
+                        alt={agent.display_name}
+                        className="w-12 h-12 rounded-lg object-cover bg-gray-900 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-lg bg-gray-900 flex items-center justify-center text-indigo-400 text-lg shrink-0">
+                        &#9672;
+                      </div>
+                    )}
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-medium text-gray-100 truncate">
+                          {agent.display_name}
+                        </h3>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-600/30 text-indigo-300">
+                          {agent.scenario_type.replace('_', ' ')}
+                        </span>
+                        <RecommendationBadge
+                          recommendation={recommendations.find((r) => r.scenario_name === agent.name)}
+                        />
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {agent.last_used
+                          ? `Last used ${formatDate(agent.last_used)}`
+                          : `Created ${formatDate(agent.created_at)}`}
+                        {agent.forked_from && (
+                          <span className="ml-2 text-gray-600">
+                            forked from {formatName(agent.forked_from)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => handleAgentStart(agent)}
+                        disabled={starting !== null}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded transition-colors disabled:opacity-50"
+                      >
+                        {starting === agent.name ? 'Starting...' : 'Start'}
+                      </button>
+                      <button
+                        onClick={() => handleAgentEdit(agent)}
+                        className="px-2 py-1.5 text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-600 rounded transition-colors"
+                        title="Edit"
+                      >
+                        Edit
+                      </button>
+                      {confirmDeleteAgent === agent.name ? (
+                        <>
+                          <button
+                            onClick={() => handleAgentDelete(agent.name)}
+                            className="px-2 py-1.5 text-xs text-red-400 hover:text-red-300 rounded transition-colors"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteAgent(null)}
+                            className="px-1 py-1.5 text-xs text-gray-500 hover:text-gray-300"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmDeleteAgent(agent.name)}
+                          className="px-1 py-1.5 text-xs text-gray-600 hover:text-red-400 rounded transition-colors"
+                          title="Delete"
+                        >
+                          &times;
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Scenario Cards */}
         <div className="grid gap-4 max-w-3xl mx-auto">
-          {[...scenarios]
+          {[...standaloneScenarios]
             .sort((a, b) => {
               const ua = recommendations.find((r) => r.scenario_name === a.name)?.urgency ?? 0
               const ub = recommendations.find((r) => r.scenario_name === b.name)?.urgency ?? 0
@@ -176,6 +349,18 @@ export function SessionSetup() {
             </button>
           ))}
 
+          {/* Create Agent card */}
+          <button
+            onClick={openFreshCreator}
+            className="text-left rounded-lg border-2 border-dashed border-gray-700 p-5 hover:border-indigo-500/50 hover:bg-indigo-950/20 transition-colors flex items-center justify-center gap-3 min-h-[100px]"
+          >
+            <span className="text-2xl text-indigo-400">&#9672;</span>
+            <div>
+              <span className="text-sm text-gray-300 block">Create Agent</span>
+              <span className="text-xs text-gray-600">Build a custom interviewer</span>
+            </div>
+          </button>
+
           {/* Create Scenario card */}
           <button
             onClick={() => setShowBuilder(true)}
@@ -193,6 +378,17 @@ export function SessionSetup() {
               setShowBuilder(false)
               reloadScenarios()
             }}
+          />
+        )}
+
+        {showAgentCreator && (
+          <AgentCreator
+            onClose={() => {
+              setShowAgentCreator(false)
+              setEditingAgent(null)
+              reloadScenarios()
+            }}
+            editingAgent={editingAgent}
           />
         )}
 

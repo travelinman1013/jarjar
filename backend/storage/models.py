@@ -70,6 +70,20 @@ class DiagramSnapshot(SQLModel, table=True):
     )
 
 
+class Agent(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True)  # matches YAML filename in scenarios/custom/
+    display_name: str
+    attribute_values: str  # JSON of AgentAttributes
+    visual_thumbnail: str = ""  # data URL of canvas snapshot
+    scenario_type: str  # system_design, behavioral, technical
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+    last_used: Optional[datetime] = None
+    forked_from: Optional[str] = None  # name of source template
+
+
 class SkillDimension(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(unique=True)  # normalized via .lower().strip()
