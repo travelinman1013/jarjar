@@ -9,14 +9,29 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from pydantic import BaseModel
 
 from openai import AsyncOpenAI
 
-from conversation.llm import client, LLM_MODEL, LLM_PROVIDER, MLX_MODEL
+import conversation.llm as llm_module
 
 logger = logging.getLogger(__name__)
+
+_SPECIAL_TOKEN_RE = re.compile(r"<\|[^|]*\|>")
+
+
+class _SanitizingAsyncOpenAI(AsyncOpenAI):
+    """AsyncOpenAI wrapper that strips special tokens from message content."""
+
+    async def post(self, path, *, body=None, **kwargs):
+        if isinstance(body, dict):
+            for msg in body.get("messages", []):
+                content = msg.get("content")
+                if isinstance(content, str) and "<|" in content:
+                    msg["content"] = _SPECIAL_TOKEN_RE.sub("", content)
+        return await super().post(path, body=body, **kwargs)
 
 _cached_client: AsyncOpenAI | None = None
 
@@ -33,18 +48,18 @@ async def _get_client() -> AsyncOpenAI:
     if _cached_client is not None:
         return _cached_client
 
-    if LLM_PROVIDER == "mlx":
+    if llm_module.LLM_PROVIDER == "mlx":
         from conversation.mlx_server import ensure_mlx_server
         base_url = await ensure_mlx_server()
-        _cached_client = AsyncOpenAI(base_url=base_url, api_key="mlx")
+        _cached_client = _SanitizingAsyncOpenAI(base_url=base_url, api_key="mlx")
     else:
-        _cached_client = client
+        _cached_client = llm_module.client
 
     return _cached_client
 
 
 def _get_model_name() -> str:
-    return MLX_MODEL if LLM_PROVIDER == "mlx" else LLM_MODEL
+    return llm_module.MLX_MODEL if llm_module.LLM_PROVIDER == "mlx" else llm_module.LLM_MODEL
 
 
 class PhaseDecision(BaseModel):

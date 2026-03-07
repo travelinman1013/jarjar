@@ -50,8 +50,7 @@ export function SessionSetup() {
   const { dimensions, recommendations, fetchProfile } = useProfileStore()
   const { pastSessions, fetchPastSessions } = useHistoryStore()
   const { agents, fetchAgents, deleteAgent } = useAgentLibraryStore()
-  const setFeedback = useSessionStore((s) => s.setFeedback)
-  const setView = useSessionStore((s) => s.setView)
+  const loadPastSession = useSessionStore((s) => s.loadPastSession)
 
   useEffect(() => {
     fetch(`${API_BASE}/api/scenarios`)
@@ -402,16 +401,26 @@ export function SessionSetup() {
                 )
                 if (!res.ok) return
                 const data = await res.json()
-                setSession(session.id, session.scenario_name, false)
-                if (data.score) {
-                  const feedback = {
-                    ...data.score,
-                    phase_scores: data.phase_scores,
-                    dimensions: data.score.dimension_names,
-                  }
-                  setFeedback(feedback)
-                }
-                setView('review')
+                const feedback = data.score ? {
+                  ...data.score,
+                  phase_scores: data.phase_scores,
+                  dimensions: data.score.dimension_names,
+                } : null
+                const transcripts = (data.transcripts || []).map((t: Record<string, unknown>) => ({
+                  text: t.text,
+                  speaker: t.speaker,
+                  turnId: t.turn_id,
+                  timestamp: t.timestamp,
+                  isFinal: true,
+                  phase: t.phase,
+                }))
+                loadPastSession(
+                  session.id,
+                  session.scenario_name,
+                  transcripts,
+                  feedback,
+                  data.diagrams || [],
+                )
               } catch {
                 // Silent failure
               }

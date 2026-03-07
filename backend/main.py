@@ -419,6 +419,7 @@ async def get_session(session_id: int):
 
 @app.post("/api/sessions/{session_id}/analyze")
 async def analyze_session(session_id: int):
+    logger.info("Analyze request for session %d", session_id)
     session_data = await asyncio.to_thread(get_session_with_transcripts, session_id)
     if not session_data:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -429,6 +430,7 @@ async def analyze_session(session_id: int):
 
     existing = await asyncio.to_thread(get_score_by_session_id, session_id)
     if existing:
+        logger.info("Session %d already analyzed, returning cached score", session_id)
         # Also return phase scores if available
         phase_scores = await asyncio.to_thread(
             get_phase_scores_by_session_id, session_id
@@ -443,6 +445,11 @@ async def analyze_session(session_id: int):
     )
     evaluation_criteria = scenario.evaluation_criteria if scenario else []
     filler_count = count_filler_words(transcripts)
+    logger.info(
+        "Session %d: %d transcripts, scenario=%s, rubrics=%s",
+        session_id, len(transcripts), session_data["scenario_name"],
+        bool(scenario and scenario.rubrics),
+    )
 
     if scenario and scenario.rubrics:
         # Rubric-based multi-phase evaluation
@@ -460,6 +467,11 @@ async def analyze_session(session_id: int):
         )
 
         summary = result["summary"]
+        logger.info(
+            "Session %d: feedback complete — %d phase scores, overall=%s",
+            session_id, len(result["phase_scores"]),
+            summary.get("overall_score"),
+        )
         await asyncio.to_thread(
             save_score,
             session_id,
@@ -501,6 +513,10 @@ async def analyze_session(session_id: int):
             knowledge_collections=scenario.knowledge_collections if scenario else [],
         )
 
+        logger.info(
+            "Session %d: legacy feedback complete — overall=%s",
+            session_id, feedback.get("overall_score"),
+        )
         await asyncio.to_thread(
             save_score,
             session_id,
@@ -1050,7 +1066,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     logger.info("Session stopped")
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
+        # RuntimeError: Starlette raises this instead of WebSocketDisconnect when
+        # receive() is called after a disconnect message was already processed.
         await cancel_bot_task(bot_response_task)
         # Record duration on unexpected disconnect
         if session_id and session_start_time:

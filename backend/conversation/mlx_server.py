@@ -8,6 +8,7 @@ import atexit
 import collections
 import logging
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -53,7 +54,8 @@ async def ensure_mlx_server() -> str:
     """
     global _process, _start_time, _reader_thread
 
-    if _process is not None and _process.poll() is None:
+    proc = _process  # snapshot to avoid SIGTERM race
+    if proc is not None and proc.poll() is None:
         return MLX_SERVER_BASE_URL
 
     import asyncio
@@ -83,6 +85,13 @@ async def ensure_mlx_server() -> str:
     )
     _start_time = time.monotonic()
     atexit.register(shutdown_mlx_server)
+
+    # SIGTERM handler for uvicorn --reload (atexit doesn't fire on signal kill)
+    try:
+        signal.signal(signal.SIGTERM, lambda *_: shutdown_mlx_server())
+    except ValueError:
+        # signal.signal() must be called from the main thread
+        logger.debug("Cannot register SIGTERM handler from non-main thread")
 
     # Start daemon thread to consume stderr into ring buffer
     _reader_thread = threading.Thread(
@@ -117,28 +126,30 @@ async def ensure_mlx_server() -> str:
 def shutdown_mlx_server():
     """Terminate the mlx_lm.server subprocess if running."""
     global _process, _start_time, _reader_thread
-    if _process is not None and _process.poll() is None:
-        logger.info("Shutting down MLX inference server...")
-        _process.terminate()
-        try:
-            _process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _process.kill()
+    proc = _process  # snapshot to avoid races with concurrent callers
     _process = None
     _start_time = None
     _reader_thread = None
+    if proc is not None and proc.poll() is None:
+        logger.info("Shutting down MLX inference server...")
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def get_mlx_status() -> dict:
     """Return current MLX server status for the REST API."""
     from .llm import MLX_MODEL
 
-    running = _process is not None and _process.poll() is None
+    proc = _process  # snapshot to avoid races
+    running = proc is not None and proc.poll() is None
     return {
         "running": running,
         "model": MLX_MODEL if running else None,
         "port": MLX_SERVER_PORT,
-        "pid": _process.pid if running and _process else None,
+        "pid": proc.pid if running and proc else None,
         "uptime_seconds": round(time.monotonic() - _start_time, 1) if running and _start_time else None,
     }
 

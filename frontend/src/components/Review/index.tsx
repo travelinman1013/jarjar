@@ -7,6 +7,7 @@ export function Review() {
   const feedback = useSessionStore((s) => s.feedback)
   const transcripts = useSessionStore((s) => s.transcripts)
   const scenarioName = useSessionStore((s) => s.scenarioName)
+  const sessionId = useSessionStore((s) => s.sessionId)
   const clearSession = useSessionStore((s) => s.clearSession)
 
   if (!feedback) {
@@ -14,7 +15,9 @@ export function Review() {
       <div className="flex flex-col h-screen">
         <header className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
           <div>
-            <h1 className="text-xl font-semibold text-gray-100">Session Review</h1>
+            <h1 className="text-xl font-semibold text-gray-100">
+              Session Review{sessionId ? ` · #${sessionId}` : ''}
+            </h1>
             {scenarioName && (
               <span className="text-sm text-gray-400">
                 {scenarioName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
@@ -62,7 +65,7 @@ export function Review() {
       <header className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
         <div>
           <h1 className="text-xl font-semibold text-gray-100">
-            Session Review
+            Session Review{sessionId ? ` · #${sessionId}` : ''}
           </h1>
           {scenarioName && (
             <span className="text-sm text-gray-400">

@@ -8,9 +8,26 @@ Configured via LLM_PROVIDER env var.
 """
 
 import os
+import re
 from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI
+
+# Matches special tokens like <|channel|>, <|message|>, <|end|>, etc.
+_SPECIAL_TOKEN_RE = re.compile(r"<\|[^|]*\|>")
+
+
+class _SanitizingAsyncOpenAI(AsyncOpenAI):
+    """AsyncOpenAI wrapper that strips special tokens from message content."""
+
+    async def post(self, path, *, body=None, **kwargs):
+        if isinstance(body, dict):
+            for msg in body.get("messages", []):
+                content = msg.get("content")
+                if isinstance(content, str) and "<|" in content:
+                    msg["content"] = _SPECIAL_TOKEN_RE.sub("", content)
+        return await super().post(path, body=body, **kwargs)
+
 
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "lmstudio")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
@@ -37,7 +54,7 @@ async def _get_mlx_client() -> AsyncOpenAI:
     if _mlx_client is None:
         from .mlx_server import ensure_mlx_server
         base_url = await ensure_mlx_server()
-        _mlx_client = AsyncOpenAI(base_url=base_url, api_key="mlx")
+        _mlx_client = _SanitizingAsyncOpenAI(base_url=base_url, api_key="mlx")
     return _mlx_client
 
 
@@ -77,6 +94,28 @@ async def _stream_lmstudio(
             yield content
 
 
+def _coalesce_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Merge consecutive messages with the same role.
+
+    mlx_lm.server requires strict alternating user/assistant roles.
+    Consecutive same-role messages can occur after barge-in or failed bot responses.
+    """
+    if not messages:
+        return messages
+    result: list[dict[str, str]] = [messages[0]]
+    for msg in messages[1:]:
+        if msg["role"] == result[-1]["role"]:
+            result[-1] = {**result[-1], "content": result[-1]["content"] + "\n" + msg["content"]}
+        else:
+            result.append(msg)
+    # Strip special tokens (e.g. <|channel|>, <|message|>, <|end|>) from
+    # non-system messages to prevent mlx_lm.server rejection on next turn
+    for msg in result:
+        if msg["role"] != "system":
+            msg["content"] = _SPECIAL_TOKEN_RE.sub("", msg["content"])
+    return result
+
+
 async def _stream_mlx(
     messages: list[dict[str, str]],
     temperature: float,
@@ -88,6 +127,7 @@ async def _stream_mlx(
     safety net (the server is also started with enable_thinking=false).
     """
     mlx_client = await _get_mlx_client()
+    messages = _coalesce_messages(messages)
     response = await mlx_client.chat.completions.create(
         model=MLX_MODEL,
         messages=messages,
@@ -103,7 +143,9 @@ async def _stream_mlx(
 
         # Fast path: not in a think block and no tag markers present
         if not in_think and "<" not in content:
-            yield content
+            cleaned = _SPECIAL_TOKEN_RE.sub("", content)
+            if cleaned:
+                yield cleaned
             continue
 
         # Process character-by-character for think tag boundaries
@@ -115,7 +157,9 @@ async def _stream_mlx(
                     # Entered a think block — drop the tag from output
                     buf = buf[: -len("<think>")]
                     if buf:
-                        yield buf
+                        cleaned = _SPECIAL_TOKEN_RE.sub("", buf)
+                        if cleaned:
+                            yield cleaned
                     buf = ""
                     in_think = True
             else:
@@ -126,4 +170,6 @@ async def _stream_mlx(
 
         # Yield any remaining non-think content
         if buf and not in_think:
-            yield buf
+            cleaned = _SPECIAL_TOKEN_RE.sub("", buf)
+            if cleaned:
+                yield cleaned

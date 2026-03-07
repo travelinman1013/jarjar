@@ -85,6 +85,13 @@ interface SessionState {
   setPhaseList: (phases: { name: string; display_name: string }[]) => void
   setScenarioDuration: (minutes: number | null) => void
   setError: (msg: string | null) => void
+  loadPastSession: (
+    id: number,
+    scenario: string,
+    transcripts: TranscriptEntry[],
+    feedback: FeedbackData | null,
+    diagramSnapshots: DiagramSnapshotData[],
+  ) => void
   addTranscript: (entry: TranscriptEntry) => void
   addBotSentence: (text: string, timestamp: number) => void
   reset: () => void
@@ -170,6 +177,16 @@ export const useSessionStore = create<SessionState>()((set) => ({
   setPhaseList: (phases) => set({ phaseList: phases }),
   setScenarioDuration: (minutes) => set({ scenarioDuration: minutes }),
   setError: (msg) => set({ error: msg }),
+  loadPastSession: (id, scenario, transcripts, feedback, diagramSnapshots) =>
+    set({
+      sessionId: id,
+      scenarioName: scenario,
+      view: 'review',
+      transcripts,
+      feedback,
+      diagramSnapshots,
+      isAnalyzing: false,
+    }),
   addTranscript: (entry) =>
     set((state) => {
       // Replace existing entry with same turnId, or append

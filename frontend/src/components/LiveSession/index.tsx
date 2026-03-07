@@ -325,6 +325,13 @@ export function LiveSession() {
     if (analyzingRef.current) return
     analyzingRef.current = true
 
+    // Capture session ID immediately before any state changes
+    const capturedSessionId = useSessionStore.getState().sessionId
+    if (!capturedSessionId) {
+      analyzingRef.current = false
+      return
+    }
+
     stopCapture()
     flush()
     sendControl({ type: 'session.stop' })
@@ -336,17 +343,12 @@ export function LiveSession() {
     await new Promise((r) => setTimeout(r, 1000))
     disconnect()
 
-    const { sessionId, setAnalyzing, setFeedback, setView, setDiagramSnapshots } =
+    const { setAnalyzing, setFeedback, setView, setDiagramSnapshots } =
       useSessionStore.getState()
-    if (!sessionId) {
-      analyzingRef.current = false
-      return
-    }
-
     setAnalyzing(true)
     try {
       const res = await fetch(
-        `http://localhost:8000/api/sessions/${sessionId}/analyze`,
+        `http://localhost:8000/api/sessions/${capturedSessionId}/analyze`,
         { method: 'POST' },
       )
       if (!res.ok) throw new Error('Analysis failed')
@@ -356,7 +358,7 @@ export function LiveSession() {
       // Fetch diagram snapshots for review
       try {
         const diagRes = await fetch(
-          `http://localhost:8000/api/sessions/${sessionId}/diagrams`,
+          `http://localhost:8000/api/sessions/${capturedSessionId}/diagrams`,
         )
         if (diagRes.ok) {
           setDiagramSnapshots(await diagRes.json())

@@ -14,16 +14,39 @@ from collections import OrderedDict
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from openai import AsyncOpenAI
+
 from storage.db import get_diagram_snapshot_for_phase
-from .llm import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_PROVIDER, MLX_MODEL
+from . import llm as llm_module
 
 logger = logging.getLogger(__name__)
 
 FILLER_PATTERN = re.compile(
     r"\b(um|uh|like|you know|basically)\b", re.IGNORECASE
 )
+
+# Matches special tokens like <|channel|>, <|message|>, <|end|>
+_SPECIAL_TOKEN_RE = re.compile(r"<\|[^|]*\|>")
+
+
+class _SanitizingAsyncOpenAI(AsyncOpenAI):
+    """AsyncOpenAI wrapper that strips special tokens from message content.
+
+    Some models (e.g. gpt-oss-20b) output <|channel|> / <|message|> / <|end|>
+    tokens. mlx_lm.server rejects requests containing these tokens in message
+    content fields.  This wrapper sanitizes the body before each API call.
+    """
+
+    async def post(self, path, *, body=None, **kwargs):
+        if isinstance(body, dict):
+            for msg in body.get("messages", []):
+                content = msg.get("content")
+                if isinstance(content, str) and "<|" in content:
+                    msg["content"] = _SPECIAL_TOKEN_RE.sub("", content)
+        return await super().post(path, body=body, **kwargs)
 
 # ── Pydantic AI model setup ─────────────────────────────────────────────────
 
@@ -42,16 +65,43 @@ async def _get_model():
     if _cached_model is not None:
         return _cached_model
 
-    if LLM_PROVIDER == "mlx":
+    if llm_module.LLM_PROVIDER == "mlx":
         from .mlx_server import ensure_mlx_server
         base_url = await ensure_mlx_server()
-        provider = OpenAIProvider(base_url=base_url, api_key="mlx")
-        _cached_model = OpenAIChatModel(MLX_MODEL, provider=provider)
+        client = _SanitizingAsyncOpenAI(base_url=base_url, api_key="mlx")
+        provider = OpenAIProvider(openai_client=client)
+        # mlx_lm.server doesn't support tool calling — use prompted JSON output
+        mlx_profile = ModelProfile(
+            supports_tools=False,
+            default_structured_output_mode='json',
+        )
+        _cached_model = OpenAIChatModel(
+            llm_module.MLX_MODEL, provider=provider, profile=mlx_profile,
+        )
     else:
-        provider = OpenAIProvider(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
-        _cached_model = OpenAIChatModel(LLM_MODEL, provider=provider)
+        provider = OpenAIProvider(base_url=llm_module.LLM_BASE_URL, api_key=llm_module.LLM_API_KEY)
+        _cached_model = OpenAIChatModel(llm_module.LLM_MODEL, provider=provider)
 
     return _cached_model
+
+
+def _get_model_settings() -> dict:
+    """Return model settings tuned for the active provider."""
+    if llm_module.LLM_PROVIDER == "mlx":
+        return {"temperature": 0.3, "max_tokens": 4096}
+    return {}
+
+
+def _log_agent_failure(label: str, exc: Exception) -> None:
+    """Log detailed debug info when a Pydantic AI agent fails."""
+    logger.error("%s failed: %s", label, exc)
+    # UnexpectedModelBehavior has a body attr with the raw model output
+    body = getattr(exc, "body", None)
+    if body:
+        logger.error("%s raw model output:\n%s", label, body[:2000])
+    cause = exc.__cause__
+    if cause:
+        logger.error("%s validation error: %s", label, cause)
 
 
 # ── Output models ───────────────────────────────────────────────────────────
@@ -99,27 +149,32 @@ class SummaryResult(BaseModel):
 
 _phase_agent = Agent(
     output_type=PhaseEvaluationResult,
+    output_retries=3,
     instructions=(
         "You are an expert interview coach evaluating a single phase of an interview. "
         "Score each dimension using the provided rubric anchors. "
         "Always cite a direct quote from the transcript as evidence. "
-        "Be specific and constructive in suggestions."
+        "Be specific and constructive in suggestions. "
+        "You MUST respond with valid JSON only, no markdown fencing or extra text."
     ),
 )
 
 _summary_agent = Agent(
     output_type=SummaryResult,
+    output_retries=3,
     instructions=(
         "You are an expert interview coach providing a holistic summary "
         "of an interview session based on per-phase evaluation results. "
         "Synthesize the per-phase scores into overall clarity, structure, "
         "and depth scores. Identify the single best moment and biggest "
-        "opportunity across the entire interview."
+        "opportunity across the entire interview. "
+        "You MUST respond with valid JSON only, no markdown fencing or extra text."
     ),
 )
 
 _legacy_agent = Agent(
     output_type=LegacyFeedbackResult,
+    output_retries=3,
     instructions=(
         "You are an expert interview coach. Analyze the following interview "
         "transcript and provide structured feedback. "
@@ -127,7 +182,8 @@ _legacy_agent = Agent(
         "clarity_score: How clearly and concisely the candidate communicated. "
         "structure_score: How well-organized and logical the responses were. "
         "depth_score: How thoroughly the candidate explored topics with examples. "
-        "overall_score: Holistic assessment of interview performance."
+        "overall_score: Holistic assessment of interview performance. "
+        "You MUST respond with valid JSON only, no markdown fencing or extra text."
     ),
 )
 
@@ -195,6 +251,10 @@ async def generate_rubric_feedback(
     and 'dimensions' (list of focus area names).
     """
     segments = _segment_by_phase(transcripts)
+    logger.info(
+        "Rubric feedback for session %d: %d phases (%s)",
+        session_id, len(segments), ", ".join(segments.keys()),
+    )
     rubric_text = _build_rubric_prompt(focus_areas, rubrics)
 
     # Build phase display name lookup
@@ -262,8 +322,15 @@ async def generate_rubric_feedback(
 
         prompt = "\n".join(prompt_parts)
 
+        logger.info("Evaluating phase '%s' (%d user turns, %d chars prompt)...",
+                     phase_name, len(user_turns), len(prompt))
         try:
-            result = await _phase_agent.run(prompt, model=await _get_model())
+            model = await _get_model()
+            settings = _get_model_settings()
+            logger.debug("Phase agent model=%s, settings=%s", model, settings)
+            result = await _phase_agent.run(
+                prompt, model=model, model_settings=settings,
+            )
             evaluation = result.output
 
             phase_score_data = {
@@ -276,15 +343,20 @@ async def generate_rubric_feedback(
             }
             phase_scores.append(phase_score_data)
             all_dimension_scores.extend(evaluation.dimensions)
+            logger.info("Phase '%s' evaluated: %d dimensions, scores=%s",
+                        phase_name, len(evaluation.dimensions),
+                        [d.score for d in evaluation.dimensions])
 
-        except Exception:
-            logger.exception("Phase evaluation failed for %s, skipping", phase_name)
+        except Exception as exc:
+            _log_agent_failure(f"Phase evaluation [{phase_name}]", exc)
             continue
 
     # Generate summary from per-phase results
+    logger.info("Generating summary from %d phase scores...", len(phase_scores))
     summary = await _generate_summary(
         transcripts, scenario_name, phase_scores, all_dimension_scores, focus_areas,
     )
+    logger.info("Summary complete: overall=%s", summary.get("overall_score"))
 
     return {
         "summary": summary,
@@ -329,10 +401,12 @@ async def _generate_summary(
     )
 
     try:
-        result = await _summary_agent.run(prompt, model=await _get_model())
+        result = await _summary_agent.run(
+            prompt, model=await _get_model(), model_settings=_get_model_settings(),
+        )
         return result.output.model_dump()
-    except Exception:
-        logger.exception("Summary generation failed, computing from phase scores")
+    except Exception as exc:
+        _log_agent_failure("Summary generation", exc)
         return _compute_fallback_summary(all_dimensions)
 
 
@@ -407,8 +481,10 @@ async def generate_feedback_legacy(
     prompt = "\n".join(prompt_parts)
 
     try:
-        result = await _legacy_agent.run(prompt, model=await _get_model())
+        result = await _legacy_agent.run(
+            prompt, model=await _get_model(), model_settings=_get_model_settings(),
+        )
         return result.output.model_dump()
-    except Exception:
-        logger.exception("Legacy feedback generation failed")
+    except Exception as exc:
+        _log_agent_failure("Legacy feedback generation", exc)
         return _default_summary()
