@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
+import { useProfileStore } from '../../stores/profileStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 
 export function Settings({ onClose }: { onClose: () => void }) {
   const { settings, isLoading, fetchSettings, updateSettings } = useSettingsStore()
+  const { dimensions, resetFullProfile, resetDimensions } = useProfileStore()
   const [localVad, setLocalVad] = useState(800)
   const [localVoice, setLocalVoice] = useState('')
   const [localModel, setLocalModel] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [confirmFullReset, setConfirmFullReset] = useState(false)
+  const [selectedDims, setSelectedDims] = useState<Set<string>>(new Set())
+  const [confirmSelectiveReset, setConfirmSelectiveReset] = useState(false)
+  const [isResetting, setIsResetting] = useState(false)
 
   useEffect(() => {
     fetchSettings()
@@ -126,6 +132,122 @@ export function Settings({ onClose }: { onClose: () => void }) {
             {isLoading ? 'Saving...' : 'Save Settings'}
           </button>
         )}
+
+        {/* Skill Profile Reset */}
+        <div className="border-t border-gray-700 pt-5">
+          <h3 className="text-sm font-medium text-gray-300 uppercase tracking-wide mb-3">
+            Skill Profile
+          </h3>
+
+          {dimensions.length > 0 ? (
+            <>
+              {/* Selective reset */}
+              <div className="space-y-2 mb-4">
+                <label className="block text-sm text-gray-400 mb-1">
+                  Select dimensions to reset
+                </label>
+                {dimensions.map((d) => (
+                  <label
+                    key={d.name}
+                    className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedDims.has(d.name)}
+                      onChange={(e) => {
+                        const next = new Set(selectedDims)
+                        if (e.target.checked) next.add(d.name)
+                        else next.delete(d.name)
+                        setSelectedDims(next)
+                        setConfirmSelectiveReset(false)
+                      }}
+                      className="accent-blue-500"
+                    />
+                    <span>{d.name}</span>
+                    <span className="text-gray-500 ml-auto">
+                      {d.current_score.toFixed(1)}
+                    </span>
+                  </label>
+                ))}
+                {selectedDims.size > 0 && (
+                  !confirmSelectiveReset ? (
+                    <button
+                      onClick={() => setConfirmSelectiveReset(true)}
+                      disabled={isResetting}
+                      className="mt-2 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      Reset Selected ({selectedDims.size})
+                    </button>
+                  ) : (
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          setIsResetting(true)
+                          await resetDimensions([...selectedDims])
+                          setSelectedDims(new Set())
+                          setConfirmSelectiveReset(false)
+                          setIsResetting(false)
+                        }}
+                        disabled={isResetting}
+                        className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {isResetting ? 'Resetting...' : 'Confirm Reset'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmSelectiveReset(false)}
+                        className="px-3 py-1.5 text-gray-400 hover:text-gray-200 text-sm"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )
+                )}
+              </div>
+
+              {/* Full reset */}
+              <div className="border-t border-gray-700/50 pt-3">
+                {!confirmFullReset ? (
+                  <button
+                    onClick={() => setConfirmFullReset(true)}
+                    disabled={isResetting}
+                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Reset All Skill Data
+                  </button>
+                ) : (
+                  <div>
+                    <p className="text-sm text-red-400 mb-2">
+                      This clears all skill tracking data. Past sessions are not affected.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          setIsResetting(true)
+                          await resetFullProfile()
+                          setConfirmFullReset(false)
+                          setSelectedDims(new Set())
+                          setIsResetting(false)
+                        }}
+                        disabled={isResetting}
+                        className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {isResetting ? 'Resetting...' : 'Confirm Full Reset'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmFullReset(false)}
+                        className="px-3 py-1.5 text-gray-400 hover:text-gray-200 text-sm"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-gray-500">No skill data to reset.</p>
+          )}
+        </div>
       </div>
     </div>
   )

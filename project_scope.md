@@ -181,6 +181,24 @@ Cross-session skill tracking with FSRS spaced repetition scheduling.
 - Profile updates are idempotent: re-analyzing a session updates scores but does not re-advance FSRS intervals
 - Single implicit global profile (single-tenant local-first app, no user accounts)
 
+### 3b-ii. Session & Profile Data Management
+
+Housekeeping tools for cleaning up test/junk data.
+
+**Session Deletion:**
+- Individual session delete with cascade cleanup of all child data (transcripts, scores, phase scores, diagram snapshots, skill observations)
+- Batch delete via multi-select mode in session history UI
+- After deletion, affected skill dimensions are recalculated: EMA replayed chronologically from remaining observations, FSRS card state rebuilt from scratch
+- Dimensions with zero remaining observations are automatically deleted
+- Two-step inline confirmation for both single and batch deletes
+
+**Skill Profile Reset:**
+- Full reset: wipes all `SkillDimension` and `SkillObservation` rows (nuclear option for polluted test data)
+- Selective reset: pick specific dimensions to clear while keeping others intact
+- Past sessions and their scores/transcripts are NOT affected — only the aggregated profile
+- Available in Settings panel with per-dimension checkboxes and two-step confirmation
+- After reset, re-analyzing any past session rebuilds profile entries fresh
+
 ### 3c. Real-Time Collaborative Whiteboard
 
 Optional tldraw v4 drawing canvas for system design scenarios.

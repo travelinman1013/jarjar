@@ -8,10 +8,15 @@ from profile.fsrs_engine import compute_retrievability, review_skill, score_to_r
 from scenarios.loader import ScenarioConfig, load_scenarios
 from storage.db import (
     create_skill_observation,
+    delete_skill_dimension,
     get_all_skill_dimensions,
+    get_observations_for_dimension,
     get_phase_scores_by_session_id,
+    get_skill_dimension_by_id,
     get_skill_dimension_by_name,
     get_skill_observations_by_session,
+    reset_all_skill_data,
+    reset_skill_dimensions,
     update_skill_observation,
     upsert_skill_dimension,
 )
@@ -121,6 +126,48 @@ def update_profile_from_session(session_id: int) -> None:
                 "Profile updated: %s score=%.1f -> %.1f (EMA), count=%d",
                 dim_name, avg_score, new_ema, new_count,
             )
+
+
+def recalculate_dimensions(dimension_ids: list[int]) -> None:
+    """Recalculate EMA + FSRS for dimensions from remaining observations.
+
+    Deletes dimension if no observations remain.
+    """
+    for dim_id in dimension_ids:
+        observations = get_observations_for_dimension(dim_id)
+        if not observations:
+            delete_skill_dimension(dim_id)
+            continue
+        dim = get_skill_dimension_by_id(dim_id)
+        if not dim:
+            continue
+        # Replay EMA chronologically
+        score = 0.0
+        for i, obs in enumerate(observations):
+            score = _ema_score(score, obs.score, i + 1)
+        # Replay FSRS from fresh card
+        card_json = ""
+        for obs in observations:
+            card_json, _, _ = review_skill(card_json, obs.score)
+        last_obs = observations[-1]
+        upsert_skill_dimension(
+            name=dim.name,
+            current_score=score,
+            session_count=len(observations),
+            last_practiced=last_obs.created_at,
+            fsrs_card_json=card_json,
+        )
+
+
+def reset_profile() -> int:
+    """Full profile reset. Returns dimensions cleared count."""
+    return reset_all_skill_data()
+
+
+def reset_dimensions(names: list[str]) -> list[str]:
+    """Selective dimension reset. Returns names actually cleared."""
+    normalized = [normalize_dimension_name(n) for n in names]
+    return reset_skill_dimensions(normalized)
 
 
 def get_profile() -> dict:

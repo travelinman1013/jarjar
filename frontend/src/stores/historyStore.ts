@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useProfileStore } from './profileStore'
 
 export interface PastSession {
   id: number
@@ -23,6 +24,8 @@ interface HistoryState {
   trendsLoaded: boolean
   fetchPastSessions: (limit?: number, offset?: number) => Promise<void>
   fetchTrends: () => Promise<void>
+  deleteSession: (sessionId: number) => Promise<void>
+  deleteSessions: (sessionIds: number[]) => Promise<void>
 }
 
 export const useHistoryStore = create<HistoryState>((set, get) => ({
@@ -62,6 +65,31 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
       set({ trends, trendsLoaded: true })
     } catch {
       // Silent failure
+    }
+  },
+
+  deleteSession: async (sessionId: number) => {
+    const res = await fetch(
+      `http://localhost:8000/api/sessions/${sessionId}`,
+      { method: 'DELETE' },
+    )
+    if (res.ok) {
+      set({ trendsLoaded: false })
+      get().fetchPastSessions()
+      useProfileStore.getState().fetchProfile()
+    }
+  },
+
+  deleteSessions: async (sessionIds: number[]) => {
+    const res = await fetch('http://localhost:8000/api/sessions', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_ids: sessionIds }),
+    })
+    if (res.ok) {
+      set({ trendsLoaded: false })
+      get().fetchPastSessions()
+      useProfileStore.getState().fetchProfile()
     }
   },
 }))

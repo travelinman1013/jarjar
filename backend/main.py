@@ -24,7 +24,7 @@ from conversation.llm import stream_chat_completion
 from conversation.manager import chunk_sentences
 from conversation.phases import InterviewConductor
 from conversation.router import evaluate_phase_transition
-from profile.manager import get_profile, get_recommendations, update_profile_from_session
+from profile.manager import get_profile, get_recommendations, recalculate_dimensions, reset_dimensions, reset_profile, update_profile_from_session
 from scenarios.loader import (
     ScenarioConfig,
     load_scenarios,
@@ -37,6 +37,7 @@ from storage.db import (
     create_db_and_tables,
     create_session as db_create_session,
     add_transcript_entry,
+    delete_session_cascade,
     get_diagram_snapshots_by_session_id,
     get_phase_scores_by_session_id,
     get_session_scenario,
@@ -207,6 +208,34 @@ async def list_sessions(limit: int = 50, offset: int = 0):
     return await asyncio.to_thread(list_all_sessions, limit, offset)
 
 
+@app.delete("/api/sessions/{session_id}")
+async def remove_session(session_id: int):
+    affected = await asyncio.to_thread(delete_session_cascade, session_id)
+    if affected is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if affected:
+        await asyncio.to_thread(recalculate_dimensions, affected)
+    return {"deleted": session_id}
+
+
+class BatchDeleteRequest(BaseModel):
+    session_ids: list[int]
+
+
+@app.delete("/api/sessions")
+async def remove_sessions_batch(req: BatchDeleteRequest):
+    all_affected: set[int] = set()
+    deleted_ids: list[int] = []
+    for sid in req.session_ids:
+        affected = await asyncio.to_thread(delete_session_cascade, sid)
+        if affected is not None:
+            deleted_ids.append(sid)
+            all_affected.update(affected)
+    if all_affected:
+        await asyncio.to_thread(recalculate_dimensions, list(all_affected))
+    return {"deleted": deleted_ids, "count": len(deleted_ids)}
+
+
 @app.get("/api/trends")
 async def get_trends():
     return await asyncio.to_thread(get_skill_trends)
@@ -331,6 +360,22 @@ async def get_candidate_profile():
     profile = await asyncio.to_thread(get_profile)
     recommendations = await asyncio.to_thread(get_recommendations)
     return {**profile, "recommendations": recommendations}
+
+
+@app.delete("/api/profile")
+async def reset_full_profile():
+    count = await asyncio.to_thread(reset_profile)
+    return {"reset": "full", "dimensions_cleared": count}
+
+
+class DimensionResetRequest(BaseModel):
+    dimension_names: list[str]
+
+
+@app.delete("/api/profile/dimensions")
+async def reset_profile_dimensions(req: DimensionResetRequest):
+    cleared = await asyncio.to_thread(reset_dimensions, req.dimension_names)
+    return {"reset": "selective", "dimensions_cleared": cleared}
 
 
 class SettingsUpdate(BaseModel):

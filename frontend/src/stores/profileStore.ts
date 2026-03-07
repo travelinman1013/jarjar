@@ -22,9 +22,11 @@ interface ProfileState {
   recommendations: RecommendationData[]
   isLoading: boolean
   fetchProfile: () => Promise<void>
+  resetFullProfile: () => Promise<void>
+  resetDimensions: (names: string[]) => Promise<void>
 }
 
-export const useProfileStore = create<ProfileState>()((set) => ({
+export const useProfileStore = create<ProfileState>()((set, get) => ({
   dimensions: [],
   recommendations: [],
   isLoading: false,
@@ -44,5 +46,19 @@ export const useProfileStore = create<ProfileState>()((set) => ({
     } finally {
       set({ isLoading: false })
     }
+  },
+
+  resetFullProfile: async () => {
+    await fetch(`${API_BASE}/api/profile`, { method: 'DELETE' })
+    get().fetchProfile()
+  },
+
+  resetDimensions: async (names: string[]) => {
+    await fetch(`${API_BASE}/api/profile/dimensions`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dimension_names: names }),
+    })
+    get().fetchProfile()
   },
 }))

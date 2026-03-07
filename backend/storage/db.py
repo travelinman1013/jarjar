@@ -6,7 +6,7 @@ All functions are synchronous — call via asyncio.to_thread() from async contex
 import json
 
 from sqlalchemy import func, text
-from sqlmodel import Session as DBSession, SQLModel, create_engine, select
+from sqlmodel import Session as DBSession, SQLModel, create_engine, delete, select
 
 from .models import (
     DiagramSnapshot,
@@ -381,6 +381,82 @@ def list_all_sessions(limit: int = 50, offset: int = 0) -> dict:
             })
 
         return {"sessions": results, "total": total}
+
+
+def reset_all_skill_data() -> int:
+    """Delete all SkillObservation and SkillDimension rows. Returns count deleted."""
+    with DBSession(engine) as db:
+        db.exec(delete(SkillObservation))
+        count = len(db.exec(select(SkillDimension)).all())
+        db.exec(delete(SkillDimension))
+        db.commit()
+        return count
+
+
+def reset_skill_dimensions(dimension_names: list[str]) -> list[str]:
+    """Delete specific dimensions and their observations. Returns names actually deleted."""
+    with DBSession(engine) as db:
+        deleted = []
+        for name in dimension_names:
+            dim = db.exec(
+                select(SkillDimension).where(SkillDimension.name == name)
+            ).first()
+            if dim:
+                db.exec(
+                    delete(SkillObservation).where(
+                        SkillObservation.skill_dimension_id == dim.id
+                    )
+                )
+                db.delete(dim)
+                deleted.append(name)
+        db.commit()
+        return deleted
+
+
+def delete_session_cascade(session_id: int) -> list[int] | None:
+    """Delete session and all related data. Returns affected dimension IDs, or None if not found."""
+    with DBSession(engine) as db:
+        session = db.get(Session, session_id)
+        if not session:
+            return None
+        # Collect affected dimension IDs before deleting observations
+        affected = list(db.exec(
+            select(SkillObservation.skill_dimension_id)
+            .where(SkillObservation.session_id == session_id)
+            .distinct()
+        ).all())
+        # Delete children in FK order
+        db.exec(delete(SkillObservation).where(SkillObservation.session_id == session_id))
+        db.exec(delete(Score).where(Score.session_id == session_id))
+        db.exec(delete(PhaseScore).where(PhaseScore.session_id == session_id))
+        db.exec(delete(DiagramSnapshot).where(DiagramSnapshot.session_id == session_id))
+        db.exec(delete(TranscriptEntry).where(TranscriptEntry.session_id == session_id))
+        db.delete(session)
+        db.commit()
+        return affected
+
+
+def get_observations_for_dimension(dimension_id: int) -> list[SkillObservation]:
+    """Get all observations for a dimension, ordered by creation time."""
+    with DBSession(engine) as db:
+        return list(db.exec(
+            select(SkillObservation)
+            .where(SkillObservation.skill_dimension_id == dimension_id)
+            .order_by(SkillObservation.created_at)
+        ).all())
+
+
+def get_skill_dimension_by_id(dimension_id: int) -> SkillDimension | None:
+    with DBSession(engine) as db:
+        return db.get(SkillDimension, dimension_id)
+
+
+def delete_skill_dimension(dimension_id: int) -> None:
+    with DBSession(engine) as db:
+        dim = db.get(SkillDimension, dimension_id)
+        if dim:
+            db.delete(dim)
+            db.commit()
 
 
 def get_skill_trends() -> list[dict]:

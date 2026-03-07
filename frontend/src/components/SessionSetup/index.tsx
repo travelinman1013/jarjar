@@ -220,6 +220,8 @@ export function SessionSetup() {
                 // Silent failure
               }
             }}
+            onDelete={useHistoryStore.getState().deleteSession}
+            onDeleteBatch={useHistoryStore.getState().deleteSessions}
           />
       </div>
     </div>
@@ -255,23 +257,96 @@ function scoreColor(score: number | null): string {
 function SessionHistory({
   sessions,
   onView,
+  onDelete,
+  onDeleteBatch,
 }: {
   sessions: PastSession[]
   onView: (session: PastSession) => void
+  onDelete: (sessionId: number) => Promise<void>
+  onDeleteBatch: (sessionIds: number[]) => Promise<void>
 }) {
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [confirmingId, setConfirmingId] = useState<number | null>(null)
+  const [confirmBatch, setConfirmBatch] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+
   if (sessions.length === 0) return null
+
+  const toggleSelect = (id: number) => {
+    const next = new Set(selectedIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelectedIds(next)
+  }
+
+  const exitSelectMode = () => {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+    setConfirmBatch(false)
+  }
 
   return (
     <div className="max-w-3xl mx-auto mt-8">
-      <h2 className="text-sm font-medium text-gray-300 uppercase tracking-wide mb-3">
-        Past Sessions
-      </h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-medium text-gray-300 uppercase tracking-wide">
+          Past Sessions
+        </h2>
+        <div className="flex items-center gap-2">
+          {selectMode && selectedIds.size > 0 && (
+            !confirmBatch ? (
+              <button
+                onClick={() => setConfirmBatch(true)}
+                disabled={isDeleting}
+                className="text-xs px-2 py-1 bg-red-600/80 hover:bg-red-600 text-white rounded transition-colors disabled:opacity-50"
+              >
+                Delete Selected ({selectedIds.size})
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={async () => {
+                    setIsDeleting(true)
+                    await onDeleteBatch([...selectedIds])
+                    setIsDeleting(false)
+                    exitSelectMode()
+                  }}
+                  disabled={isDeleting}
+                  className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded transition-colors disabled:opacity-50"
+                >
+                  {isDeleting ? 'Deleting...' : 'Confirm Delete'}
+                </button>
+                <button
+                  onClick={() => setConfirmBatch(false)}
+                  className="text-xs px-2 py-1 text-gray-400 hover:text-gray-200"
+                >
+                  Cancel
+                </button>
+              </>
+            )
+          )}
+          <button
+            onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+            className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 transition-colors"
+          >
+            {selectMode ? 'Done' : 'Select'}
+          </button>
+        </div>
+      </div>
       <div className="rounded-lg border border-gray-700 bg-gray-800/50 divide-y divide-gray-700/50 max-h-80 overflow-y-auto">
         {sessions.map((s) => (
           <div
             key={s.id}
             className="flex items-center justify-between px-4 py-3 hover:bg-gray-700/50 transition-colors"
           >
+            {selectMode && (
+              <input
+                type="checkbox"
+                checked={selectedIds.has(s.id)}
+                onChange={() => toggleSelect(s.id)}
+                className="accent-blue-500 mr-3 shrink-0"
+              />
+            )}
             <div className="flex items-center gap-4 min-w-0 flex-1">
               <span className="text-sm text-gray-200 truncate w-48">
                 {formatName(s.scenario_name)}
@@ -286,12 +361,48 @@ function SessionHistory({
                 {s.overall_score ?? '--'}
               </span>
             </div>
-            <button
-              onClick={() => onView(s)}
-              className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded hover:bg-blue-400/10 transition-colors"
-            >
-              View
-            </button>
+            {!selectMode && (
+              <div className="flex items-center gap-1">
+                {confirmingId === s.id ? (
+                  <>
+                    <button
+                      onClick={async () => {
+                        setIsDeleting(true)
+                        await onDelete(s.id)
+                        setConfirmingId(null)
+                        setIsDeleting(false)
+                      }}
+                      disabled={isDeleting}
+                      className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-400/10 transition-colors disabled:opacity-50"
+                    >
+                      {isDeleting ? '...' : 'Delete'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmingId(null)}
+                      className="text-xs text-gray-500 hover:text-gray-300 px-1 py-1"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => onView(s)}
+                      className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded hover:bg-blue-400/10 transition-colors"
+                    >
+                      View
+                    </button>
+                    <button
+                      onClick={() => setConfirmingId(s.id)}
+                      className="text-xs text-gray-600 hover:text-red-400 px-1 py-1 rounded transition-colors"
+                      title="Delete session"
+                    >
+                      &times;
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
