@@ -5,7 +5,7 @@ All functions are synchronous — call via asyncio.to_thread() from async contex
 
 import json
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlmodel import Session as DBSession, SQLModel, create_engine, select
 
 from .models import (
@@ -346,6 +346,69 @@ def get_diagram_snapshot_for_phase(
             "serialized_text": row.serialized_text,
             "shape_count": row.shape_count,
         }
+
+
+def list_all_sessions(limit: int = 50, offset: int = 0) -> dict:
+    """List all sessions with summary data (score, transcript count)."""
+    with DBSession(engine) as db:
+        # Count total sessions
+        total = db.exec(select(func.count(Session.id))).one()
+
+        # Get sessions with optional score
+        sessions = db.exec(
+            select(Session).order_by(Session.created_at.desc()).offset(offset).limit(limit)
+        ).all()
+
+        results = []
+        for s in sessions:
+            # Get score if exists
+            score = db.exec(
+                select(Score.overall_score).where(Score.session_id == s.id)
+            ).first()
+            # Count transcripts
+            t_count = db.exec(
+                select(func.count(TranscriptEntry.id)).where(
+                    TranscriptEntry.session_id == s.id
+                )
+            ).one()
+            results.append({
+                "id": s.id,
+                "scenario_name": s.scenario_name,
+                "created_at": s.created_at.isoformat(),
+                "duration_seconds": s.duration_seconds,
+                "overall_score": score,
+                "transcript_count": t_count,
+            })
+
+        return {"sessions": results, "total": total}
+
+
+def get_skill_trends() -> list[dict]:
+    """Get score trends per skill dimension over time."""
+    with DBSession(engine) as db:
+        dimensions = db.exec(select(SkillDimension)).all()
+        trends = []
+        for dim in dimensions:
+            observations = db.exec(
+                select(SkillObservation, Session.created_at)
+                .join(Session, SkillObservation.session_id == Session.id)
+                .where(SkillObservation.skill_dimension_id == dim.id)
+                .order_by(Session.created_at)
+            ).all()
+            data_points = [
+                {
+                    "session_id": obs.session_id,
+                    "created_at": created_at.isoformat(),
+                    "score": obs.score,
+                }
+                for obs, created_at in observations
+            ]
+            if data_points:
+                trends.append({
+                    "dimension_name": dim.name,
+                    "data_points": data_points,
+                })
+        return trends
 
 
 def get_session_with_transcripts(session_id: int) -> dict | None:

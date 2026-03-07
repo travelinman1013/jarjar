@@ -7,6 +7,8 @@ import asyncio
 import json
 import logging
 import time
+
+import yaml
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -23,7 +25,14 @@ from conversation.manager import chunk_sentences
 from conversation.phases import InterviewConductor
 from conversation.router import evaluate_phase_transition
 from profile.manager import get_profile, get_recommendations, update_profile_from_session
-from scenarios.loader import load_scenarios, get_scenario_by_name
+from scenarios.loader import (
+    ScenarioConfig,
+    load_scenarios,
+    get_scenario_by_name,
+    save_scenario,
+    delete_scenario,
+    is_custom_scenario,
+)
 from storage.db import (
     create_db_and_tables,
     create_session as db_create_session,
@@ -33,6 +42,8 @@ from storage.db import (
     get_session_scenario,
     get_session_with_transcripts,
     get_score_by_session_id,
+    get_skill_trends,
+    list_all_sessions,
     save_diagram_snapshot,
     save_phase_scores,
     save_score,
@@ -106,8 +117,99 @@ async def list_scenarios():
     return [s.model_dump() for s in scenarios]
 
 
+@app.post("/api/scenarios", status_code=201)
+async def create_scenario(config: ScenarioConfig):
+    existing = await asyncio.to_thread(get_scenario_by_name, config.name)
+    if existing:
+        raise HTTPException(status_code=409, detail="Scenario name already exists")
+    await asyncio.to_thread(save_scenario, config)
+    return config.model_dump()
+
+
+@app.delete("/api/scenarios/{name}")
+async def remove_scenario(name: str):
+    if not is_custom_scenario(name):
+        raise HTTPException(status_code=404, detail="Custom scenario not found")
+    await asyncio.to_thread(delete_scenario, name)
+    return {"deleted": name}
+
+
+class GenerateScenarioRequest(BaseModel):
+    description: str
+    type: str = "technical"
+    difficulty: str = "medium"
+
+
+@app.post("/api/scenarios/generate")
+async def generate_scenario(req: GenerateScenarioRequest):
+    """Use LLM to generate a scenario config from a description."""
+    import re
+
+    system_prompt = """You are a scenario designer for a voice interview coach application.
+Generate a complete interview scenario configuration as valid YAML based on the user's description.
+
+The YAML must include these fields:
+- name: snake_case identifier (unique)
+- type: one of behavioral, technical, system_design
+- difficulty: one of easy, medium, hard
+- duration_minutes: integer (10-30)
+- system_prompt: detailed interviewer instructions (plain text, no emojis or markdown)
+- focus_areas: list of 3-5 skill dimensions to evaluate
+- evaluation_criteria: list of 4-6 concrete evaluation points
+- phases: list of interview phases, each with:
+  - name: snake_case
+  - display_name: human readable
+  - objective: what this phase should accomplish
+  - prompt_injection: instructions injected into the system prompt for this phase
+  - max_turns: integer (3-8)
+  - min_turns: integer (1-2)
+  - transition_hint: when to move to the next phase
+  - next_phases: list of possible next phase names
+- rubrics: for each focus_area, scoring anchors at levels 3, 5, 7, 9
+- whiteboard_enabled: boolean
+
+Respond with ONLY the YAML content, no explanations or markdown fences."""
+
+    user_prompt = f"Create a {req.difficulty} {req.type} interview scenario: {req.description}"
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    tokens: list[str] = []
+    async for token in stream_chat_completion(messages, temperature=0.7, max_tokens=4096):
+        tokens.append(token)
+
+    raw_output = "".join(tokens)
+
+    # Strip markdown fences if present
+    cleaned = re.sub(r"^```(?:yaml)?\s*\n?", "", raw_output.strip())
+    cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+
+    try:
+        data = yaml.safe_load(cleaned)
+        config = ScenarioConfig(**data)
+        return config.model_dump()
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to parse generated scenario: {str(e)}",
+        )
+
+
 class CreateSessionRequest(BaseModel):
     scenario_name: str
+
+
+@app.get("/api/sessions")
+async def list_sessions(limit: int = 50, offset: int = 0):
+    return await asyncio.to_thread(list_all_sessions, limit, offset)
+
+
+@app.get("/api/trends")
+async def get_trends():
+    return await asyncio.to_thread(get_skill_trends)
 
 
 @app.get("/api/sessions/{session_id}")
@@ -231,6 +333,68 @@ async def get_candidate_profile():
     return {**profile, "recommendations": recommendations}
 
 
+class SettingsUpdate(BaseModel):
+    vad_silence_ms: int | None = None
+    llm_model: str | None = None
+    kokoro_voice: str | None = None
+
+
+@app.get("/api/settings")
+async def get_settings():
+    import audio.vad as vad_module
+    import audio.tts as tts_module
+    import conversation.llm as llm_module
+
+    available_voices = tts.get_voices()
+
+    available_models = [llm_module.LLM_MODEL]
+    try:
+        models = await llm_module.client.models.list()
+        available_models = [m.id for m in models.data]
+    except Exception:
+        pass
+
+    return {
+        "vad_silence_ms": vad_module.SILENCE_THRESHOLD_MS,
+        "llm_model": llm_module.LLM_MODEL,
+        "llm_base_url": llm_module.LLM_BASE_URL,
+        "kokoro_voice": tts_module.KOKORO_VOICE,
+        "available_voices": available_voices,
+        "available_models": available_models,
+    }
+
+
+@app.patch("/api/settings")
+async def update_settings(update: SettingsUpdate):
+    import audio.vad as vad_module
+    import audio.tts as tts_module
+    import conversation.llm as llm_module
+
+    if update.vad_silence_ms is not None:
+        vad_module.SILENCE_THRESHOLD_MS = max(300, min(2000, update.vad_silence_ms))
+
+    if update.llm_model is not None:
+        llm_module.LLM_MODEL = update.llm_model
+
+    if update.kokoro_voice is not None:
+        available = tts.get_voices()
+        if available and update.kokoro_voice not in available:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Voice '{update.kokoro_voice}' not available. Choose from: {available}",
+            )
+        tts_module.KOKORO_VOICE = update.kokoro_voice
+
+    return {
+        "vad_silence_ms": vad_module.SILENCE_THRESHOLD_MS,
+        "llm_model": llm_module.LLM_MODEL,
+        "llm_base_url": llm_module.LLM_BASE_URL,
+        "kokoro_voice": tts_module.KOKORO_VOICE,
+        "available_voices": tts.get_voices(),
+        "available_models": [llm_module.LLM_MODEL],
+    }
+
+
 @app.get("/api/sessions/{session_id}/diagrams")
 async def get_session_diagrams(session_id: int):
     return await asyncio.to_thread(get_diagram_snapshots_by_session_id, session_id)
@@ -265,6 +429,7 @@ async def run_bot_response(
             yield token
 
     try:
+        await websocket.send_json({"type": "bot_thinking"})
         token_stream = stream_chat_completion(conversation.get_messages())
         async for sentence in chunk_sentences(_capture(token_stream)):
             if first_chunk:
@@ -477,7 +642,19 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     session_start_time = time.time()
                     logger.info(f"Session started (id={session_id})")
-                    await websocket.send_json({"type": "session.ready"})
+
+                    # Include phase list for progress indicator
+                    phase_list = []
+                    if conductor.phases:
+                        phase_list = [
+                            {"name": p.name, "display_name": p.display_name}
+                            for p in (scenario.phases if scenario and scenario.phases else [])
+                        ]
+                    await websocket.send_json({
+                        "type": "session.ready",
+                        "phase_list": phase_list,
+                        "duration_minutes": scenario.duration_minutes if scenario else None,
+                    })
 
                 elif msg_type == "diagram_state":
                     snapshot = data.get("snapshot", {})

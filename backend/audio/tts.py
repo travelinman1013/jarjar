@@ -45,6 +45,11 @@ class TextToSpeech:
         self._kokoro = Kokoro(str(MODEL_PATH), str(VOICES_PATH))
         logger.info(f"Kokoro TTS loaded. Available voices: {self._kokoro.get_voices()}")
 
+    def get_voices(self) -> list[str]:
+        if not self._kokoro:
+            return []
+        return list(self._kokoro.get_voices())
+
     def _synthesize_sync(self, text: str) -> bytes:
         clean = re.sub(r'[^\w\s.,!?\'\"-]', '', text)
         clean = re.sub(r'\s+', ' ', clean).strip()

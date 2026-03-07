@@ -58,9 +58,15 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             break
           case 'session.ready':
             store.setReady(true)
+            if (data.phase_list) store.setPhaseList(data.phase_list)
+            if (data.duration_minutes) store.setScenarioDuration(data.duration_minutes)
+            break
+          case 'bot_thinking':
+            store.setBotThinking(true)
             break
           case 'bot_speech_start':
             store.setBotSpeaking(true)
+            store.setBotThinking(false)
             break
           case 'bot_speech_stop':
             store.setBotSpeaking(false)
@@ -70,6 +76,7 @@ export function useWebSocket(options?: UseWebSocketOptions) {
             break
           case 'interrupt_ack':
             store.setBotSpeaking(false)
+            store.setBotThinking(false)
             optionsRef.current?.onInterrupt?.()
             break
           case 'phase_change':

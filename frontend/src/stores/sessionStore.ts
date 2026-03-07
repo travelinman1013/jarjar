@@ -64,6 +64,9 @@ interface SessionState {
   phaseDisplayName: string | null
   whiteboardEnabled: boolean
   diagramSnapshots: DiagramSnapshotData[]
+  isBotThinking: boolean
+  phaseList: { name: string; display_name: string }[]
+  scenarioDuration: number | null
 
   setSession: (id: number, scenario: string, whiteboardEnabled?: boolean) => void
   clearSession: () => void
@@ -77,6 +80,9 @@ interface SessionState {
   setView: (v: 'setup' | 'session' | 'review') => void
   setPhase: (phase: string, displayName: string) => void
   setDiagramSnapshots: (snapshots: DiagramSnapshotData[]) => void
+  setBotThinking: (v: boolean) => void
+  setPhaseList: (phases: { name: string; display_name: string }[]) => void
+  setScenarioDuration: (minutes: number | null) => void
   addTranscript: (entry: TranscriptEntry) => void
   addBotSentence: (text: string, timestamp: number) => void
   reset: () => void
@@ -99,6 +105,9 @@ export const useSessionStore = create<SessionState>()((set) => ({
   phaseDisplayName: null,
   whiteboardEnabled: false,
   diagramSnapshots: [],
+  isBotThinking: false,
+  phaseList: [],
+  scenarioDuration: null,
 
   setSession: (id, scenario, whiteboardEnabled = false) =>
     set({
@@ -117,6 +126,9 @@ export const useSessionStore = create<SessionState>()((set) => ({
       phaseDisplayName: null,
       whiteboardEnabled,
       diagramSnapshots: [],
+      isBotThinking: false,
+      phaseList: [],
+      scenarioDuration: null,
     }),
   clearSession: () =>
     set({
@@ -135,6 +147,9 @@ export const useSessionStore = create<SessionState>()((set) => ({
       phaseDisplayName: null,
       whiteboardEnabled: false,
       diagramSnapshots: [],
+      isBotThinking: false,
+      phaseList: [],
+      scenarioDuration: null,
     }),
   setRecording: (v) => set({ isRecording: v }),
   setConnected: (v) => set({ isConnected: v }),
@@ -146,6 +161,9 @@ export const useSessionStore = create<SessionState>()((set) => ({
   setView: (v) => set({ view: v }),
   setPhase: (phase, displayName) => set({ currentPhase: phase, phaseDisplayName: displayName }),
   setDiagramSnapshots: (snapshots) => set({ diagramSnapshots: snapshots }),
+  setBotThinking: (v) => set({ isBotThinking: v }),
+  setPhaseList: (phases) => set({ phaseList: phases }),
+  setScenarioDuration: (minutes) => set({ scenarioDuration: minutes }),
   addTranscript: (entry) =>
     set((state) => {
       // Replace existing entry with same turnId, or append
@@ -215,5 +233,8 @@ export const useSessionStore = create<SessionState>()((set) => ({
       phaseDisplayName: null,
       whiteboardEnabled: false,
       diagramSnapshots: [],
+      isBotThinking: false,
+      phaseList: [],
+      scenarioDuration: null,
     }),
 }))

@@ -6,19 +6,38 @@ Built for Apple Silicon (tested on Mac Studio M3 Ultra with 256GB unified memory
 
 ## Features
 
+### Core Interview Experience
 - **Real-time voice conversation** — speak naturally and get instant spoken responses from an AI interview coach
 - **Multiple interview scenarios** — behavioral, technical system design, and warm-up sessions with configurable difficulty
 - **Live transcription** — see both your speech and the coach's responses in real-time
 - **Barge-in support** — interrupt the coach mid-sentence, just like a real conversation
+- **Real-time whiteboard** — tldraw v4 drawing canvas for sketching system design diagrams during technical interviews (per-scenario opt-in)
+
+### Live Session UX
+- **Session timer** — elapsed time display with countdown when scenario has a duration limit, red warning at <2 minutes remaining
+- **Phase progress indicator** — horizontal step bar showing all interview phases with current phase highlighted
+- **Bot thinking indicator** — visual "Thinking..." state shown while the LLM generates a response (before TTS starts)
+- **Pre-session brief** — scenario info (name, type, duration, phases) displayed before recording starts, replacing the blank void
+
+### Post-Session Analysis
 - **Multi-dimensional rubric evaluation** — per-phase scoring with rubric anchors (3/5/7/9 levels), transcript evidence quotes, and stronger-answer suggestions powered by Pydantic AI structured output
 - **Dynamic radar chart** — adapts dimensions to scenario focus areas (e.g., requirements gathering, trade-off analysis for system design)
 - **Phase-by-phase breakdown** — expandable timeline showing dimension scores, evidence, and improvement advice for each interview phase
 - **RAG-grounded evaluation** — cross-references candidate claims against local knowledge base for technical accuracy
-- **Real-time whiteboard** — tldraw v4 drawing canvas for sketching system design diagrams during technical interviews (per-scenario opt-in)
 - **Diagram-aware evaluation** — serialized whiteboard snapshots injected into feedback prompts so the LLM scores architecture diagrams alongside verbal responses
 - **Diagram replay in review** — read-only tldraw viewer per phase in the post-session review, showing what the candidate drew
 - **Filler word tracking** — automatic detection of "um", "uh", "like", "you know", "basically"
+
+### Progress Tracking
+- **Session history** — browse all past sessions with scenario name, date, duration, and score; click "View" to revisit any session's review
+- **Skill trend charts** — expandable per-dimension score graphs showing improvement over time (recharts LineChart)
+- **Skill profile with FSRS** — spaced repetition scheduling recommends which scenarios to practice next based on skill decay
 - **Session persistence** — transcripts (with phase annotations), scores, per-phase evaluations, and diagram snapshots saved to SQLite
+
+### Customization
+- **AI-assisted scenario creation** — describe an interview scenario in plain text, and the LLM generates a complete config with phases, rubrics, and evaluation criteria
+- **Manual scenario editor** — full form for creating/editing scenarios: phases, focus areas, evaluation criteria, system prompts, whiteboard toggle
+- **Voice & model settings** — runtime configuration of TTS voice (dropdown of available Kokoro voices), VAD response delay (300-2000ms slider), and LLM model selection
 
 ## Architecture
 
@@ -144,23 +163,27 @@ npm install
 
 ## Usage
 
-1. **Select a scenario** from the setup screen (Quick Warmup, Behavioral, System Design, etc.)
-2. **Click "Start Recording"** — grant microphone access when prompted
-3. **Speak naturally** — the coach will respond with voice and text
-4. **Click "End & Review"** when done — the AI analyzes your performance
-5. **Review your scores** — dynamic radar chart (adapts to scenario focus areas), per-phase breakdown with rubric-grounded dimension scores, evidence quotes, stronger-answer suggestions, read-only diagram replay per phase, filler word count, and full phase-grouped transcript replay
+1. **Select a scenario** from the setup screen (Quick Warmup, Behavioral, System Design, etc.) — or create your own with the AI-assisted scenario builder
+2. **Review the pre-session brief** — scenario details, phases, and tips are shown before you start
+3. **Click "Start Recording"** — grant microphone access when prompted
+4. **Speak naturally** — the coach will respond with voice and text. Watch the timer, phase progress, and thinking indicator in the header.
+5. **Click "End & Review"** when done — the AI analyzes your performance
+6. **Review your scores** — dynamic radar chart, per-phase breakdown with rubric-grounded scores, evidence quotes, stronger-answer suggestions, diagram replay, filler word count, and full transcript
+7. **Track your progress** — browse past sessions and skill trend charts on the setup screen
 
-For system design scenarios, a tldraw whiteboard panel appears alongside the transcript. Use the toggle button in the header to show/hide it mid-session. Diagrams are automatically captured at each phase transition and included in the LLM's evaluation.
+**Whiteboard**: For system design scenarios, a tldraw whiteboard panel appears alongside the transcript. Use the toggle button in the header to show/hide it mid-session. Diagrams are automatically captured at each phase transition and included in the LLM's evaluation.
+
+**Settings**: Click the gear icon on the setup screen to configure TTS voice, VAD response delay, and LLM model. Changes take effect for new sessions (not persisted to `.env`).
 
 ## Project Structure
 
 ```
 ├── backend/
-│   ├── main.py                    # FastAPI app + WebSocket handler
+│   ├── main.py                    # FastAPI app + WebSocket handler + settings API
 │   ├── audio/
 │   │   ├── vad.py                 # Silero VAD (speech detection)
 │   │   ├── stt.py                 # mlx-whisper (transcription)
-│   │   └── tts.py                 # Kokoro TTS (speech synthesis)
+│   │   └── tts.py                 # Kokoro TTS (speech synthesis + voice listing)
 │   ├── conversation/
 │   │   ├── llm.py                 # LM Studio OpenAI client
 │   │   ├── manager.py             # Legacy message history + sentence chunking
@@ -175,12 +198,13 @@ For system design scenarios, a tldraw whiteboard panel appears alongside the tra
 │   │   ├── retriever.py           # RAG orchestrator
 │   │   └── ingest.py              # CLI for knowledge base ingestion
 │   ├── scenarios/
-│   │   ├── loader.py              # YAML scenario parser (with rubrics)
-│   │   └── templates/             # Interview scenario configs + rubric anchors
+│   │   ├── loader.py              # YAML scenario parser + save/delete for custom
+│   │   ├── templates/             # Built-in interview scenario configs
+│   │   └── custom/                # User-created scenarios (via UI or API)
 │   └── storage/
 │       ├── models.py              # SQLModel tables (Session, Transcript, Score,
 │       │                          #   PhaseScore, DiagramSnapshot, SkillDimension)
-│       └── db.py                  # SQLite CRUD + additive migrations
+│       └── db.py                  # SQLite CRUD + additive migrations + history/trends
 ├── frontend/
 │   ├── public/audio-processor.js  # AudioWorklet (plain JS, not bundled)
 │   └── src/
@@ -190,10 +214,15 @@ For system design scenarios, a tldraw whiteboard panel appears alongside the tra
 │       │   ├── useWebSocket.ts    # WS lifecycle + message dispatch
 │       │   └── usePlayback.ts     # TTS audio queue at 24kHz
 │       ├── stores/
-│       │   ├── sessionStore.ts    # Zustand state management
-│       │   └── profileStore.ts    # Skill profile + recommendations
+│       │   ├── sessionStore.ts    # Zustand state (session, phases, timer, thinking)
+│       │   ├── profileStore.ts    # Skill profile + recommendations
+│       │   ├── historyStore.ts    # Past sessions + skill trends
+│       │   └── settingsStore.ts   # Runtime settings (voice, VAD, model)
 │       └── components/
-│           ├── SessionSetup/      # Scenario selection + skill overview
+│           ├── SessionSetup/      # Scenario selection + skill overview + history
+│           │   ├── SkillOverview  #   Skill bars with expandable trend charts
+│           │   ├── ScenarioBuilder#   AI-assisted + manual scenario creation
+│           │   └── Settings       #   Voice, VAD, model configuration panel
 │           ├── LiveSession/       # Active interview UI + whiteboard panel
 │           │   └── WhiteboardPanel.tsx  # tldraw canvas (lazy loaded)
 │           └── Review/            # Post-session dashboard (dynamic radar,

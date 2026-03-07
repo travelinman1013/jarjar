@@ -10,6 +10,7 @@ import yaml
 from pydantic import BaseModel
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+CUSTOM_DIR = Path(__file__).parent / "custom"
 
 
 class PhaseConfig(BaseModel):
@@ -40,12 +41,13 @@ class ScenarioConfig(BaseModel):
 
 def load_scenarios() -> list[ScenarioConfig]:
     scenarios = []
-    if not TEMPLATES_DIR.exists():
-        return scenarios
-    for path in sorted(TEMPLATES_DIR.glob("*.yaml")):
-        with open(path) as f:
-            data = yaml.safe_load(f)
-        scenarios.append(ScenarioConfig(**data))
+    for dir_path in [TEMPLATES_DIR, CUSTOM_DIR]:
+        if not dir_path.exists():
+            continue
+        for path in sorted(dir_path.glob("*.yaml")):
+            with open(path) as f:
+                data = yaml.safe_load(f)
+            scenarios.append(ScenarioConfig(**data))
     return scenarios
 
 
@@ -54,3 +56,24 @@ def get_scenario_by_name(name: str) -> ScenarioConfig | None:
         if s.name == name:
             return s
     return None
+
+
+def save_scenario(config: ScenarioConfig) -> None:
+    """Save a scenario config to the custom directory as YAML."""
+    CUSTOM_DIR.mkdir(parents=True, exist_ok=True)
+    path = CUSTOM_DIR / f"{config.name}.yaml"
+    with open(path, "w") as f:
+        yaml.dump(config.model_dump(), f, default_flow_style=False, sort_keys=False)
+
+
+def delete_scenario(name: str) -> bool:
+    """Delete a custom scenario. Returns False if not found or is a template."""
+    path = CUSTOM_DIR / f"{name}.yaml"
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
+def is_custom_scenario(name: str) -> bool:
+    return (CUSTOM_DIR / f"{name}.yaml").exists()
